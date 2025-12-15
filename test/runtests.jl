@@ -2,7 +2,7 @@ using LinearAlgebra
 using FDGrids
 using Test
 
-@testset "test quadrature                        " begin
+@testset "test quadrature                           " begin
 
     # quadrature
     xs = range(-2, stop=2, length=121)
@@ -36,7 +36,7 @@ using Test
 
 end
 
-@testset "test grid                              " begin
+@testset "test grid                                 " begin
     # can't do silly things
     @test_throws ArgumentError gridpoints( 1, -1,  1, 1.0)
     @test_throws ArgumentError gridpoints(10, -1,  1, 2.0)
@@ -60,7 +60,7 @@ end
     end
 end
 
-@testset "test indexing                          " begin
+@testset "test indexing                             " begin
     for M = 3:10
         for width = 3:2:9
             if M > width
@@ -80,7 +80,7 @@ end
     end
 end
 
-@testset "slicing                                " begin
+@testset "slicing                                   " begin
     # points
     xs = gridpoints(10, -1, 1, 1)
         
@@ -122,7 +122,7 @@ end
     @test all(FDGrids.full(DA + 2*DA*(3*I)) .== FDGrids.full(DA) + 2*FDGrids.full(DA)*(3*I))
 end
 
-@testset "matvec/matmat product                  " begin
+@testset "matvec/matmat product                     " begin
     for width = (3, 5, 7)
         D = DiffMatrix(gridpoints(50, -1, 1), width, 1)
         Df = FDGrids.full(D)
@@ -135,7 +135,7 @@ end
     end
 end
 
-@testset "test diffmatrix at point               " begin
+@testset "test diffmatrix at point                  " begin
     # number of points
     for M in (10, 20, 30)
         for width in (3, 5, 7)
@@ -155,7 +155,7 @@ end
     end
 end
 
-@testset "test diffmatrix 1st/2nd order - vec    " begin
+@testset "test diffmatrix 1st/2nd order - vec       " begin
     # the order of accuracy is the width minus one
     for (width, v1_max, v2_center_max, v2_bndr_max) in zip((3,    5,     7), 
                                                            (1.21, 3.22,  9.85), 
@@ -203,7 +203,7 @@ end
     end
 end
 
-@testset "test diffmatrix 1st/2nd order - mat    " begin
+@testset "test diffmatrix 1st/2nd order - mat       " begin
     # the order of accuracy is the width minus one
     for (width, v1_max, v2_center_max, v2_bndr_max) in zip((3,    5,     7), 
                                                            (1.21, 3.22,  9.85), 
@@ -257,7 +257,7 @@ end
     end
 end
 
-@testset "test diffmatrix 1st/2nd order - cube   " begin
+@testset "test diffmatrix 1st/2nd order - cube      " begin
     # the order of accuracy is the width minus one
     for (width, v1_max, v2_center_max, v2_bndr_max) in zip((3,    5,     7), 
                                                            (1.21, 3.22,  9.85), 
@@ -317,7 +317,79 @@ end
     end
 end
 
-@testset "test lufact                            " begin
+@testset "test diffmatrix 1st/2nd order - hypercube " begin
+    # the order of accuracy is the width minus one
+    for (width, v1_max, v2_center_max, v2_bndr_max) in zip((3,    5,     7), 
+                                                           (1.21, 3.22,  9.85), 
+                                                           (4.66, 3.61,  3.5),
+                                                           (0.33, 0.098, 0.078))
+        # number of points on a regular grid
+        for M in (30, 40, 50)
+
+            # get grid
+            xs = gridpoints(M, -1, 1, 0.5)
+
+            # make grid from -1 to 1 using α = 0.5
+            D1 = DiffMatrix(xs, width, 1)
+            D2 = DiffMatrix(xs, width, 2)
+
+            # arrange to 3D array
+            fs          = zeros(M, 2, 2, 2)
+            fs[:, 1, 1, 1] = exp.(1.0.*xs)
+            fs[:, 1, 2, 1] = exp.(1.1.*xs)
+            fs[:, 2, 1, 1] = exp.(1.2.*xs)
+            fs[:, 2, 2, 1] = exp.(1.3.*xs)
+            fs[:, 1, 1, 2] = exp.(1.4.*xs)
+            fs[:, 1, 2, 2] = exp.(1.5.*xs)
+            fs[:, 2, 1, 2] = exp.(1.6.*xs)
+            fs[:, 2, 2, 2] = exp.(1.7.*xs)
+
+            # exact first derivative
+            d1fs_EX   = copy(fs)
+            d1fs_EX[:, 1, 1, 1] .*= 1.0
+            d1fs_EX[:, 1, 2, 1] .*= 1.1
+            d1fs_EX[:, 2, 1, 1] .*= 1.2
+            d1fs_EX[:, 2, 2, 1] .*= 1.3
+            d1fs_EX[:, 1, 1, 2] .*= 1.4
+            d1fs_EX[:, 1, 2, 2] .*= 1.5
+            d1fs_EX[:, 2, 1, 2] .*= 1.6
+            d1fs_EX[:, 2, 2, 2] .*= 1.7
+
+            # exact second derivative
+            d2fs_EX   = copy(fs)
+            d2fs_EX[:, 1, 1, 1] .*= 1.0^2
+            d2fs_EX[:, 1, 2, 1] .*= 1.1^2
+            d2fs_EX[:, 2, 1, 1] .*= 1.2^2
+            d2fs_EX[:, 2, 2, 1] .*= 1.3^2
+            d2fs_EX[:, 1, 1, 2] .*= 1.4^2
+            d2fs_EX[:, 1, 2, 2] .*= 1.5^2
+            d2fs_EX[:, 2, 1, 2] .*= 1.6^2
+            d2fs_EX[:, 2, 2, 2] .*= 1.7^2
+
+            # compute finite difference approximation along the third direction
+            d1fs_FD      = similar(fs)
+            d2fs_FD      = similar(fs)
+            mul!(d1fs_FD, D1, fs)
+            mul!(d2fs_FD, D2, fs)
+
+            # the relative error should scale like M^{-o} where o = width-1
+            v1 = maximum(abs.(d1fs_EX - d1fs_FD))/maximum(abs.(d1fs_EX))#*M^(width-1)
+            @test v1 < v1_max
+
+            # for the second derivative we have the same order in the domain center
+            i = M >> 1
+            v2 = abs(d2fs_EX[i] - d2fs_FD[i])/abs(d2fs_EX[i])*M^(width-1)
+            @test v2 < v2_center_max
+
+            # and one order less at the boundary
+            i = 1
+            v3 = abs(d2fs_EX[i] - d2fs_FD[i])/abs(d2fs_EX[i])*M^(width-2)
+            @test v3 < v2_bndr_max
+        end
+    end
+end
+
+@testset "test lufact                               " begin
     xs = gridpoints(12, -1, 1, 1)
             
     for width in (3, 5, 7)
@@ -340,7 +412,7 @@ end
     end
 end
 
-@testset "test new lufact                        " begin
+@testset "test new lufact                           " begin
     for M in (10, 100)
         xs = gridpoints(M, -1, 1, 1)
         for width in (3, 5, 7, 9)
@@ -366,7 +438,7 @@ end
     end
 end
 
-@testset "test demo linsolve                     " begin
+@testset "test demo linsolve                        " begin
     for M in (100, 300)
         xs = gridpoints(M, -1, 1, 1)
         for width in (3, 5, 7, 9, 11, 13)
@@ -392,7 +464,7 @@ end
     end
 end
 
-@testset "test BVP                               " begin
+@testset "test BVP                                  " begin
     # solve u'' + u' = 1, with u(-1) = 2, u(1) = 0
     
     # test different orders

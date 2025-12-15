@@ -119,4 +119,51 @@ for WIDTH in 3:2:MAX_WIDTH
             return y
         end
     end
+
+    @eval begin
+        # differentiate x along direction 1
+        function LinearAlgebra.mul!(y::AbstractArray{S, 4},
+                                    A::DiffMatrix{T, $WIDTH},
+                                    x::AbstractArray{S, 4}) where {T, S}
+            # check size
+            size(x, 1) == size(y, 1) == size(A.coeffs, 2) ||
+                throw(ArgumentError("inconsistent inputs size"))
+
+            # size of coeffs
+            N1, N2, N3, N4 = size(y)
+
+            @inbounds for j = 1:N2, k = 1:N3, l = 1:N4
+                for i = 1:$(WIDTH>>1)
+                    s = A.coeffs[1, i]*x[1, j, k, l]
+                    Base.Cartesian.@nexprs $(WIDTH-1) p -> begin
+                        s += A.coeffs[1 + p, i] * x[1 + p, j, k, l]
+                    end
+                    y[i, j, k, l] = s
+                end
+
+                # body
+                for i = 1+$(WIDTH>>1):N1-$(WIDTH>>1)
+                    # index of the first element of the stencil
+                    left = i - $(WIDTH>>1)
+
+                    # expand expressions
+                    s = A.coeffs[1, i]*x[left, j, k, l]
+                    Base.Cartesian.@nexprs $(WIDTH-1) p -> begin
+                        s += A.coeffs[1 + p, i]* x[left + p, j, k, l]
+                    end
+                    y[i, j, k, l] = s
+                end
+
+                # tail
+                for i = N1-$(WIDTH>>1)+1:N1
+                    s = A.coeffs[1, i]*x[(N1 - $WIDTH + 1), j, k, l]
+                    Base.Cartesian.@nexprs $(WIDTH-1) p -> begin
+                        s += A.coeffs[1 + p, i]* x[(N1 - $WIDTH + 1) + p, j, k, l]
+                    end
+                    y[i, j, k, l] = s
+                end
+            end
+            return y
+        end
+    end
 end
