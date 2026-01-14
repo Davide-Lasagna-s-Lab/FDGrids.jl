@@ -98,7 +98,7 @@ end
     @test all(D[end, :] .== [0, 0, 0, 0, 0, 0, 0, 2, 3, 4])
 end
 
-@testset "algebra                                " begin
+@testset "algebra                                   " begin
     xs = gridpoints(6, -1, 1, 1)
         
     # diffmatrix
@@ -180,7 +180,7 @@ end
             # exact second derivative
             d2fs_EX = copy(fs)
             
-            # compute finite difference approximation along the third direction
+            # compute finite difference approximation along the first direction
             d1fs_FD      = similar(fs)
             d2fs_FD      = similar(fs)
             mul!(d1fs_FD, D1, fs)
@@ -234,7 +234,7 @@ end
             d2fs_EX[:, 1] .*= 1.0^2
             d2fs_EX[:, 2] .*= 1.1^2
             
-            # compute finite difference approximation along the third direction
+            # compute finite difference approximation along the first direction
             d1fs_FD      = similar(fs)
             d2fs_FD      = similar(fs)
             mul!(d1fs_FD, D1, fs)
@@ -294,7 +294,7 @@ end
             d2fs_EX[:, 2, 1] .*= 1.2^2
             d2fs_EX[:, 2, 2] .*= 1.3^2
 
-            # compute finite difference approximation along the third direction
+            # compute finite difference approximation along the first direction
             d1fs_FD      = similar(fs)
             d2fs_FD      = similar(fs)
             mul!(d1fs_FD, D1, fs)
@@ -366,7 +366,7 @@ end
             d2fs_EX[:, 2, 1, 2] .*= 1.6^2
             d2fs_EX[:, 2, 2, 2] .*= 1.7^2
 
-            # compute finite difference approximation along the third direction
+            # compute finite difference approximation along the first direction
             d1fs_FD      = similar(fs)
             d2fs_FD      = similar(fs)
             mul!(d1fs_FD, D1, fs)
@@ -385,6 +385,61 @@ end
             i = 1
             v3 = abs(d2fs_EX[i] - d2fs_FD[i])/abs(d2fs_EX[i])*M^(width-2)
             @test v3 < v2_bndr_max
+        end
+    end
+end
+
+@testset "test diffmatrix with range - hypercube    " begin
+    # the order of accuracy is the width minus one
+    for (width, v1_max) in zip((3,    5,     7), 
+                               (1.21, 3.22,  9.85))
+
+        # number of points on a regular grid
+        for M in (30, 40, 50)
+
+            # get grid
+            xs = gridpoints(M, -1, 1, 0.5)
+
+            # define range
+            lwr       = rand(1 + (width >> 1):div(M, 2))
+            upr       = rand(lwr + 1:M - (width >> 1))
+            rng       = lwr:upr
+            ghost_rng = (rng[1] - (width >> 1)):(rng[end] + (width >> 1))
+
+            # make grid from -1 to 1 using α = 0.5
+            D1 = DiffMatrix(xs, width, 1)
+            D2 = DiffMatrix(xs, width, 2)
+
+            # arrange to 3D array
+            fs = zeros(length(ghost_rng), 2, 2, 2)
+            fs[:, 1, 1, 1] = exp.(1.0.*xs[ghost_rng])
+            fs[:, 1, 2, 1] = exp.(1.1.*xs[ghost_rng])
+            fs[:, 2, 1, 1] = exp.(1.2.*xs[ghost_rng])
+            fs[:, 2, 2, 1] = exp.(1.3.*xs[ghost_rng])
+            fs[:, 1, 1, 2] = exp.(1.4.*xs[ghost_rng])
+            fs[:, 1, 2, 2] = exp.(1.5.*xs[ghost_rng])
+            fs[:, 2, 1, 2] = exp.(1.6.*xs[ghost_rng])
+            fs[:, 2, 2, 2] = exp.(1.7.*xs[ghost_rng])
+
+            # exact first derivative
+            d1fs_EX = copy(fs[(1 + (width >> 1)):(length(rng) + (width >> 1)), :, :, :])
+            d1fs_EX[:, 1, 1, 1] .*= 1.0
+            d1fs_EX[:, 1, 2, 1] .*= 1.1
+            d1fs_EX[:, 2, 1, 1] .*= 1.2
+            d1fs_EX[:, 2, 2, 1] .*= 1.3
+            d1fs_EX[:, 1, 1, 2] .*= 1.4
+            d1fs_EX[:, 1, 2, 2] .*= 1.5
+            d1fs_EX[:, 2, 1, 2] .*= 1.6
+            d1fs_EX[:, 2, 2, 2] .*= 1.7
+
+            # compute finite difference approximation along the first dirextion within range
+            d1fs_FD = similar(fs[(1 + (width >> 1)):(length(rng) + (width >> 1)), :, :, :])
+            d2fs_FD = similar(fs[(1 + (width >> 1)):(length(rng) + (width >> 1)), :, :, :])
+            mul!(d1fs_FD, D1, fs, rng)
+
+            # the relative error should scale like M^{-o} where o = width-1
+            v1 = maximum(abs.(d1fs_EX - d1fs_FD))/maximum(abs.(d1fs_EX))#*M^(width-1)
+            @test v1 < v1_max
         end
     end
 end

@@ -15,12 +15,12 @@ for WIDTH in 3:2:MAX_WIDTH
             length(y) == length(x) == size(A, 2) ||
                 throw(DimensionMismatch())
 
-            # top
             @inbounds begin
+                # top
                 for i = 1:$(WIDTH>>1)
                     s = A.coeffs[1, i]*x[1]
                     Base.Cartesian.@nexprs $(WIDTH-1) p -> begin
-                        s += A.coeffs[1 + p, i] * x[1 + p]
+                        s += A.coeffs[1 + p, i]*x[1 + p]
                     end
                     y[i] = s
                 end
@@ -33,7 +33,7 @@ for WIDTH in 3:2:MAX_WIDTH
                     # expand expressions
                     s = A.coeffs[1, i]*x[left]
                     Base.Cartesian.@nexprs $(WIDTH-1) p -> begin
-                        s += A.coeffs[1 + p, i] * x[left + p]
+                        s += A.coeffs[1 + p, i]*x[left + p]
                     end
                     y[i] = s
                 end
@@ -42,7 +42,7 @@ for WIDTH in 3:2:MAX_WIDTH
                 for i = N-$(WIDTH>>1)+1:N
                     s = A.coeffs[1, i]*x[(N - $WIDTH + 1)]
                     Base.Cartesian.@nexprs $(WIDTH-1) p -> begin
-                        s += A.coeffs[1 + p, i] * x[(N - $WIDTH + 1) + p]
+                        s += A.coeffs[1 + p, i]*x[(N - $WIDTH + 1) + p]
                     end
                     y[i] = s
                 end
@@ -66,7 +66,7 @@ for WIDTH in 3:2:MAX_WIDTH
             # expand expressions
             val = A.coeffs[1, i]*x[left]
             Base.Cartesian.@nexprs $(WIDTH-1) p -> begin
-                val += A.coeffs[1 + p, i] * x[left + p]
+                val += A.coeffs[1 + p, i]*x[left + p]
             end
             
             return val
@@ -82,14 +82,15 @@ for WIDTH in 3:2:MAX_WIDTH
             size(x, 1) == size(y, 1) == size(A.coeffs, 2) ||
                 throw(ArgumentError("inconsistent inputs size"))
 
-            # size of coeffs
+            # size of array
             N1, N2, N3 = size(y)
 
             @inbounds for j = 1:N2, k = 1:N3
+                # top
                 for i = 1:$(WIDTH>>1)
                     s = A.coeffs[1, i]*x[1, j, k]
                     Base.Cartesian.@nexprs $(WIDTH-1) p -> begin
-                        s += A.coeffs[1 + p, i] * x[1 + p, j, k]
+                        s += A.coeffs[1 + p, i]*x[1 + p, j, k]
                     end
                     y[i, j, k] = s
                 end
@@ -102,7 +103,7 @@ for WIDTH in 3:2:MAX_WIDTH
                     # expand expressions
                     s = A.coeffs[1, i]*x[left, j, k]
                     Base.Cartesian.@nexprs $(WIDTH-1) p -> begin
-                        s += A.coeffs[1 + p, i]* x[left + p, j, k]
+                        s += A.coeffs[1 + p, i]*x[left + p, j, k]
                     end
                     y[i, j, k] = s
                 end
@@ -111,7 +112,7 @@ for WIDTH in 3:2:MAX_WIDTH
                 for i = N1-$(WIDTH>>1)+1:N1
                     s = A.coeffs[1, i]*x[(N1 - $WIDTH + 1), j, k]
                     Base.Cartesian.@nexprs $(WIDTH-1) p -> begin
-                        s += A.coeffs[1 + p, i]* x[(N1 - $WIDTH + 1) + p, j, k]
+                        s += A.coeffs[1 + p, i]*x[(N1 - $WIDTH + 1) + p, j, k]
                     end
                     y[i, j, k] = s
                 end
@@ -129,10 +130,11 @@ for WIDTH in 3:2:MAX_WIDTH
             size(x, 1) == size(y, 1) == size(A.coeffs, 2) ||
                 throw(ArgumentError("inconsistent inputs size"))
 
-            # size of coeffs
+            # size of array
             N1, N2, N3, N4 = size(y)
 
             @inbounds for j = 1:N2, k = 1:N3, l = 1:N4
+                # top
                 for i = 1:$(WIDTH>>1)
                     s = A.coeffs[1, i]*x[1, j, k, l]
                     Base.Cartesian.@nexprs $(WIDTH-1) p -> begin
@@ -158,7 +160,42 @@ for WIDTH in 3:2:MAX_WIDTH
                 for i = N1-$(WIDTH>>1)+1:N1
                     s = A.coeffs[1, i]*x[(N1 - $WIDTH + 1), j, k, l]
                     Base.Cartesian.@nexprs $(WIDTH-1) p -> begin
-                        s += A.coeffs[1 + p, i]* x[(N1 - $WIDTH + 1) + p, j, k, l]
+                        s += A.coeffs[1 + p, i]*x[(N1 - $WIDTH + 1) + p, j, k, l]
+                    end
+                    y[i, j, k, l] = s
+                end
+            end
+            return y
+        end
+    end
+
+    @eval begin
+        # differentiate x along direction 1 in a given range (special method required for halo arrays differentiation)
+        """
+            This function is primarily intended for use with halo arrays from the
+            HaloArrays.jl (see https://github.com/Davide-Lasagna-s-Lab/HaloArrays.jl). 
+            
+            The goal is to be able to only compute the derivative at range of points
+            in the domain `A` was generated for. This is equivalent to taking a slice
+            of the DiffMatrix `A` and multiplying only the relevent coefficients with
+            the input `x` to give the derivative within the desired `rng`.
+        """
+        function LinearAlgebra.mul!(y::AbstractArray{S, 4},
+                                    A::DiffMatrix{T, $WIDTH},
+                                    x::AbstractArray{S, 4},
+                                  rng::AbstractRange) where {T, S}
+            # size of array
+            N1, N2, N3, N4 = size(y)
+
+            @inbounds for j in 1:N2, k in 1:N3, l in 1:N4
+                for (i, A_i) in enumerate(rng)
+                    # index of the first element of the stencil
+                    left = clamp(i - ($WIDTH >> 1), 1, length(rng))
+
+                    # compute derivatives
+                    s = A.coeffs[1, A_i]*x[left, j, k, l]
+                    Base.Cartesian.@nexprs $(WIDTH - 1) p -> begin
+                        s += A.coeffs[1 + p, A_i]*x[left + p, j, k, l]
                     end
                     y[i, j, k, l] = s
                 end
