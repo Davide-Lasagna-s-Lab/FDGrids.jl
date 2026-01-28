@@ -3,7 +3,7 @@ struct DiffMatrix{T, WIDTH, OPTIMISE} <: AbstractMatrix{T}
       buff::Vector{T} # small buffer for the matvec code
     function DiffMatrix(xs::AbstractVector, width::Int, order::Int, optimise::Bool=true, ::Type{T}=Float64) where {T}
         # checks
-        3 ≤ width ≤ MAX_WIDTH || throw(ArgumentError("width must be between 3 and $MAX_WIDTH"))
+        3 ≤ width || throw(ArgumentError("width must be greater than 3"))
         width % 2 == 1 || throw(ArgumentError("width must be odd"))
         width ≤ length(xs) || throw(ArgumentError("width must not be greater than number of grid points "))
 
