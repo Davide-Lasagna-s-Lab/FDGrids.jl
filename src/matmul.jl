@@ -46,7 +46,7 @@ end
     body_range = :((1 + $hWIDTH):($Nq - $hWIDTH))
     tail_range = :(($Nq - $hWIDTH + 1):$Nq)
 
-    # N = 3
+    # main for loop block
     block = 
         if N == 1
             quote
@@ -63,17 +63,11 @@ end
                         for i = $tail_range; $tail_kernel; end
                     end
                 end
-            else
+            else # DIM = 2
                 quote
-                    for j = 1:$head_range
-                        for i = 1:N1; $head_kernel; end
-                    end
-                    for j = 1:$body_range
-                        for i = 1:N1; $body_kernel; end
-                    end
-                    for j = 1:$tail_range
-                        for i = 1:N1; $tail_kernel; end
-                    end
+                    for j = 1:$head_range; for i = 1:N1; $head_kernel; end; end
+                    for j = 1:$body_range; for i = 1:N1; $body_kernel; end; end
+                    for j = 1:$tail_range; for i = 1:N1; $tail_kernel; end; end
                 end
             end
         elseif N == 3
