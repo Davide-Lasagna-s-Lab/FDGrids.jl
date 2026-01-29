@@ -205,8 +205,8 @@ end
 
 @testset "test diffmatrix 1st/2nd order - mat       " begin
     # the order of accuracy is the width minus one
-    for (width, v1_max, v2_center_max, v2_bndr_max) in zip((3,    5,     7), 
-                                                           (1.21, 3.22,  9.85), 
+    for (width, v1_max, v2_center_max, v2_bndr_max) in zip((3,    5,     7),
+                                                           (1.21, 3.22,  9.85),
                                                            (4.66, 3.61,  3.5),
                                                            (0.33, 0.098, 0.078))
         # number of points on a regular grid
@@ -220,47 +220,64 @@ end
             D2 = DiffMatrix(xs, width, 2)
 
             # arrange to 3D array
-            fs          = zeros(M, 2)
-            fs[:, 1] = exp.(1.0.*xs)
-            fs[:, 2] = exp.(1.1.*xs)
+            fs       = zeros(M, 2)
+            fs[:, 1] = exp.(1.0 .* xs)
+            fs[:, 2] = exp.(1.1 .* xs)
 
             # exact first derivative
-            d1fs_EX   = copy(fs)
+            d1fs_EX       = copy(fs)
             d1fs_EX[:, 1] .*= 1.0
             d1fs_EX[:, 2] .*= 1.1
 
             # exact second derivative
-            d2fs_EX   = copy(fs)
+            d2fs_EX       = copy(fs)
             d2fs_EX[:, 1] .*= 1.0^2
             d2fs_EX[:, 2] .*= 1.1^2
-            
-            # compute finite difference approximation along the first direction
-            d1fs_FD      = similar(fs)
-            d2fs_FD      = similar(fs)
-            mul!(d1fs_FD, D1, fs)
-            mul!(d2fs_FD, D2, fs)
 
-            # the relative error should scale like M^{-o} where o = width-1
-            v1 = maximum(abs.(d1fs_EX - d1fs_FD))/maximum(abs.(d1fs_EX))*M^(width-1)
-            @test v1 < v1_max
+            # helper: view of arrays where the differentiated axis has length M
+            # DIM = 1 -> (M,2) as-is
+            # DIM = 2 -> (2,M) via permuted view (no copy)
+            view_for_dim(A, DIM) = DIM == 1 ? A : PermutedDimsArray(A, (2, 1))
 
-            # for the second derivative we have the same order in the domain center
-            i = M >> 1
-            v2 = abs(d2fs_EX[i] - d2fs_FD[i])/abs(d2fs_EX[i])*M^(width-1)
-            @test v2 < v2_center_max
+            # helper: index for center/boundary along the differentiated axis,
+            # keeping the other index fixed to 1
+            idx_on_axis(DIM, pos) = DIM == 1 ? CartesianIndex(pos, 1) : CartesianIndex(1, pos)
 
-            # and one order less at the boundary
-            i = 1
-            v3 = abs(d2fs_EX[i] - d2fs_FD[i])/abs(d2fs_EX[i])*M^(width-2)
-            @test v3 < v2_bndr_max
+            for DIM in 1:2
+                fs_view    = view_for_dim(fs, DIM)
+                d1fs_EX_v  = view_for_dim(d1fs_EX, DIM)
+                d2fs_EX_v  = view_for_dim(d2fs_EX, DIM)
+
+                # compute finite difference approximation along the first direction
+                d1fs_FD = similar(fs_view)
+                d2fs_FD = similar(fs_view)
+                mul!(d1fs_FD, D1, fs_view, Val(DIM))
+                mul!(d2fs_FD, D2, fs_view, Val(DIM))
+
+                # the relative error should scale like M^{-o} where o = width-1
+                v1 = maximum(abs.(d1fs_EX_v - d1fs_FD)) / maximum(abs.(d1fs_EX_v)) * M^(width-1)
+                @test v1 < v1_max
+
+                # for the second derivative we have the same order in the domain center
+                i  = M >> 1
+                I  = idx_on_axis(DIM, i)
+                v2 = abs(d2fs_EX_v[I] - d2fs_FD[I]) / abs(d2fs_EX_v[I]) * M^(width-1)
+                @test v2 < v2_center_max
+
+                # and one order less at the boundary
+                i  = 1
+                I  = idx_on_axis(DIM, i)
+                v3 = abs(d2fs_EX_v[I] - d2fs_FD[I]) / abs(d2fs_EX_v[I]) * M^(width-2)
+                @test v3 < v2_bndr_max
+            end
         end
     end
 end
 
 @testset "test diffmatrix 1st/2nd order - cube      " begin
     # the order of accuracy is the width minus one
-    for (width, v1_max, v2_center_max, v2_bndr_max) in zip((3,    5,     7), 
-                                                           (1.21, 3.22,  9.85), 
+    for (width, v1_max, v2_center_max, v2_bndr_max) in zip((3,    5,     7),
+                                                           (1.21, 3.22,  9.85),
                                                            (4.66, 3.61,  3.5),
                                                            (0.33, 0.098, 0.078))
         # number of points on a regular grid
@@ -275,52 +292,74 @@ end
 
             # arrange to 3D array
             fs          = zeros(M, 2, 2)
-            fs[:, 1, 1] = exp.(1.0.*xs)
-            fs[:, 1, 2] = exp.(1.1.*xs)
-            fs[:, 2, 1] = exp.(1.2.*xs)
-            fs[:, 2, 2] = exp.(1.3.*xs)
+            fs[:, 1, 1] = exp.(1.0 .* xs)
+            fs[:, 1, 2] = exp.(1.1 .* xs)
+            fs[:, 2, 1] = exp.(1.2 .* xs)
+            fs[:, 2, 2] = exp.(1.3 .* xs)
 
             # exact first derivative
-            d1fs_EX   = copy(fs)
+            d1fs_EX          = copy(fs)
             d1fs_EX[:, 1, 1] .*= 1.0
             d1fs_EX[:, 1, 2] .*= 1.1
             d1fs_EX[:, 2, 1] .*= 1.2
             d1fs_EX[:, 2, 2] .*= 1.3
 
             # exact second derivative
-            d2fs_EX   = copy(fs)
+            d2fs_EX          = copy(fs)
             d2fs_EX[:, 1, 1] .*= 1.0^2
             d2fs_EX[:, 1, 2] .*= 1.1^2
             d2fs_EX[:, 2, 1] .*= 1.2^2
             d2fs_EX[:, 2, 2] .*= 1.3^2
 
-            # compute finite difference approximation along the first direction
-            d1fs_FD      = similar(fs)
-            d2fs_FD      = similar(fs)
-            mul!(d1fs_FD, D1, fs)
-            mul!(d2fs_FD, D2, fs)
+            # helper: view of arrays where the differentiated axis has length M
+            # DIM = 1 -> (M,2,2) as-is
+            # DIM = 2 -> (2,M,2) via permuted view (no copy)
+            # DIM = 3 -> (2,2,M) via permuted view (no copy)
+            view_for_dim(A, DIM) = DIM == 1 ? A :
+                                   DIM == 2 ? PermutedDimsArray(A, (2, 1, 3)) :
+                                              PermutedDimsArray(A, (2, 3, 1))
 
-            # the relative error should scale like M^{-o} where o = width-1
-            v1 = maximum(abs.(d1fs_EX - d1fs_FD))/maximum(abs.(d1fs_EX))#*M^(width-1)
-            @test v1 < v1_max
+            # helper: index for center/boundary along the differentiated axis,
+            # keeping the other indices fixed to 1
+            idx_on_axis(DIM, pos) = DIM == 1 ? CartesianIndex(pos, 1, 1) :
+                                  DIM == 2 ? CartesianIndex(1, pos, 1) :
+                                             CartesianIndex(1, 1, pos)
 
-            # for the second derivative we have the same order in the domain center
-            i = M >> 1
-            v2 = abs(d2fs_EX[i] - d2fs_FD[i])/abs(d2fs_EX[i])*M^(width-1)
-            @test v2 < v2_center_max
+            for DIM in 1:3
+                fs_view    = view_for_dim(fs, DIM)
+                d1fs_EX_v  = view_for_dim(d1fs_EX, DIM)
+                d2fs_EX_v  = view_for_dim(d2fs_EX, DIM)
 
-            # and one order less at the boundary
-            i = 1
-            v3 = abs(d2fs_EX[i] - d2fs_FD[i])/abs(d2fs_EX[i])*M^(width-2)
-            @test v3 < v2_bndr_max
+                # compute finite difference approximation along the first direction
+                d1fs_FD = similar(fs_view)
+                d2fs_FD = similar(fs_view)
+                mul!(d1fs_FD, D1, fs_view, Val(DIM))
+                mul!(d2fs_FD, D2, fs_view, Val(DIM))
+
+                # the relative error should scale like M^{-o} where o = width-1
+                v1 = maximum(abs.(d1fs_EX_v - d1fs_FD)) / maximum(abs.(d1fs_EX_v)) #*M^(width-1)
+                @test v1 < v1_max
+
+                # for the second derivative we have the same order in the domain center
+                i  = M >> 1
+                I  = idx_on_axis(DIM, i)
+                v2 = abs(d2fs_EX_v[I] - d2fs_FD[I]) / abs(d2fs_EX_v[I]) * M^(width-1)
+                @test v2 < v2_center_max
+
+                # and one order less at the boundary
+                i  = 1
+                I  = idx_on_axis(DIM, i)
+                v3 = abs(d2fs_EX_v[I] - d2fs_FD[I]) / abs(d2fs_EX_v[I]) * M^(width-2)
+                @test v3 < v2_bndr_max
+            end
         end
     end
 end
 
 @testset "test diffmatrix 1st/2nd order - hypercube " begin
     # the order of accuracy is the width minus one
-    for (width, v1_max, v2_center_max, v2_bndr_max) in zip((3,    5,     7), 
-                                                           (1.21, 3.22,  9.85), 
+    for (width, v1_max, v2_center_max, v2_bndr_max) in zip((3,    5,     7),
+                                                           (1.21, 3.22,  9.85),
                                                            (4.66, 3.61,  3.5),
                                                            (0.33, 0.098, 0.078))
         # number of points on a regular grid
@@ -334,18 +373,18 @@ end
             D2 = DiffMatrix(xs, width, 2)
 
             # arrange to 3D array
-            fs          = zeros(M, 2, 2, 2)
-            fs[:, 1, 1, 1] = exp.(1.0.*xs)
-            fs[:, 1, 2, 1] = exp.(1.1.*xs)
-            fs[:, 2, 1, 1] = exp.(1.2.*xs)
-            fs[:, 2, 2, 1] = exp.(1.3.*xs)
-            fs[:, 1, 1, 2] = exp.(1.4.*xs)
-            fs[:, 1, 2, 2] = exp.(1.5.*xs)
-            fs[:, 2, 1, 2] = exp.(1.6.*xs)
-            fs[:, 2, 2, 2] = exp.(1.7.*xs)
+            fs             = zeros(M, 2, 2, 2)
+            fs[:, 1, 1, 1] = exp.(1.0 .* xs)
+            fs[:, 1, 2, 1] = exp.(1.1 .* xs)
+            fs[:, 2, 1, 1] = exp.(1.2 .* xs)
+            fs[:, 2, 2, 1] = exp.(1.3 .* xs)
+            fs[:, 1, 1, 2] = exp.(1.4 .* xs)
+            fs[:, 1, 2, 2] = exp.(1.5 .* xs)
+            fs[:, 2, 1, 2] = exp.(1.6 .* xs)
+            fs[:, 2, 2, 2] = exp.(1.7 .* xs)
 
             # exact first derivative
-            d1fs_EX   = copy(fs)
+            d1fs_EX             = copy(fs)
             d1fs_EX[:, 1, 1, 1] .*= 1.0
             d1fs_EX[:, 1, 2, 1] .*= 1.1
             d1fs_EX[:, 2, 1, 1] .*= 1.2
@@ -356,7 +395,7 @@ end
             d1fs_EX[:, 2, 2, 2] .*= 1.7
 
             # exact second derivative
-            d2fs_EX   = copy(fs)
+            d2fs_EX             = copy(fs)
             d2fs_EX[:, 1, 1, 1] .*= 1.0^2
             d2fs_EX[:, 1, 2, 1] .*= 1.1^2
             d2fs_EX[:, 2, 1, 1] .*= 1.2^2
@@ -366,25 +405,50 @@ end
             d2fs_EX[:, 2, 1, 2] .*= 1.6^2
             d2fs_EX[:, 2, 2, 2] .*= 1.7^2
 
-            # compute finite difference approximation along the first direction
-            d1fs_FD      = similar(fs)
-            d2fs_FD      = similar(fs)
-            mul!(d1fs_FD, D1, fs)
-            mul!(d2fs_FD, D2, fs)
+            # helper: view of arrays where the differentiated axis has length M
+            # DIM = 1 -> (M,2,2,2) as-is
+            # DIM = 2 -> (2,M,2,2) via permuted view (no copy)
+            # DIM = 3 -> (2,2,M,2) via permuted view (no copy)
+            # DIM = 4 -> (2,2,2,M) via permuted view (no copy)
+            view_for_dim(A, DIM) = DIM == 1 ? A :
+                                   DIM == 2 ? PermutedDimsArray(A, (2, 1, 3, 4)) :
+                                   DIM == 3 ? PermutedDimsArray(A, (2, 3, 1, 4)) :
+                                              PermutedDimsArray(A, (2, 3, 4, 1))
 
-            # the relative error should scale like M^{-o} where o = width-1
-            v1 = maximum(abs.(d1fs_EX - d1fs_FD))/maximum(abs.(d1fs_EX))#*M^(width-1)
-            @test v1 < v1_max
+            # helper: index for center/boundary along the differentiated axis,
+            # keeping the other indices fixed to 1
+            idx_on_axis(DIM, pos) = DIM == 1 ? CartesianIndex(pos, 1, 1, 1) :
+                                  DIM == 2 ? CartesianIndex(1, pos, 1, 1) :
+                                  DIM == 3 ? CartesianIndex(1, 1, pos, 1) :
+                                             CartesianIndex(1, 1, 1, pos)
 
-            # for the second derivative we have the same order in the domain center
-            i = M >> 1
-            v2 = abs(d2fs_EX[i] - d2fs_FD[i])/abs(d2fs_EX[i])*M^(width-1)
-            @test v2 < v2_center_max
+            for DIM in 1:4
+                fs_view    = view_for_dim(fs, DIM)
+                d1fs_EX_v  = view_for_dim(d1fs_EX, DIM)
+                d2fs_EX_v  = view_for_dim(d2fs_EX, DIM)
 
-            # and one order less at the boundary
-            i = 1
-            v3 = abs(d2fs_EX[i] - d2fs_FD[i])/abs(d2fs_EX[i])*M^(width-2)
-            @test v3 < v2_bndr_max
+                # compute finite difference approximation along the first direction
+                d1fs_FD = similar(fs_view)
+                d2fs_FD = similar(fs_view)
+                mul!(d1fs_FD, D1, fs_view, Val(DIM))
+                mul!(d2fs_FD, D2, fs_view, Val(DIM))
+
+                # the relative error should scale like M^{-o} where o = width-1
+                v1 = maximum(abs.(d1fs_EX_v - d1fs_FD)) / maximum(abs.(d1fs_EX_v)) #*M^(width-1)
+                @test v1 < v1_max
+
+                # for the second derivative we have the same order in the domain center
+                i  = M >> 1
+                I  = idx_on_axis(DIM, i)
+                v2 = abs(d2fs_EX_v[I] - d2fs_FD[I]) / abs(d2fs_EX_v[I]) * M^(width-1)
+                @test v2 < v2_center_max
+
+                # and one order less at the boundary
+                i  = 1
+                I  = idx_on_axis(DIM, i)
+                v3 = abs(d2fs_EX_v[I] - d2fs_FD[I]) / abs(d2fs_EX_v[I]) * M^(width-2)
+                @test v3 < v2_bndr_max
+            end
         end
     end
 end
