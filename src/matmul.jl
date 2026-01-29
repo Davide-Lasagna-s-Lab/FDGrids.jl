@@ -130,6 +130,9 @@ This method is implemented as a `@generated` function and supports `N ∈ 1:4`.
 # Examples
 Differentiate a 3D field `x` along the second dimension:
 
+```julia
+mul!(y, A, x, Val(2))
+```
 """
 @generated function LinearAlgebra.mul!(y::AbstractArray{S, N},
                                        A::DiffMatrix{T, WIDTH},
