@@ -178,9 +178,9 @@ Differentiate a 3D field `x` along the second dimension:
                 end
             else # DIM = 2
                 quote
-                    for j = 1:$head_range; for i = 1:N1; $head_kernel; end; end
-                    for j = 1:$body_range; for i = 1:N1; $body_kernel; end; end
-                    for j = 1:$tail_range; for i = 1:N1; $tail_kernel; end; end
+                    for j = $head_range; for i = 1:N1; $head_kernel; end; end
+                    for j = $body_range; for i = 1:N1; $body_kernel; end; end
+                    for j = $tail_range; for i = 1:N1; $tail_kernel; end; end
                 end
             end
         elseif N == 3
