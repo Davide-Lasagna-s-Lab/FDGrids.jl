@@ -80,7 +80,7 @@ function _make_kernel(DIM, base, WIDTH, N)
 end
 
 """
-    LinearAlgebra.mul!(y, A, x, ::Val{DIM}=Val(1))
+    LinearAlgebra.mul!(y, A::DiffMatrix, x, ::Val{DIM}=Val(1)) -> y
 
 Apply a finite-difference differentiation operator stored in `A::DiffMatrix` to an
 `N`-dimensional array `x` and write the result into `y`, differentiating along
@@ -136,9 +136,8 @@ mul!(y, A, x, Val(2))
 """
 @generated function LinearAlgebra.mul!(y::AbstractArray{S, N},
                                        A::DiffMatrix{T, WIDTH},
-                                       x::AbstractArray{S, N}, 
-                                        ::Val{DIM} = Val(1), 
-                                        ::Val{CASE} = Val((:h, :b, :t))) where {T, S, N, WIDTH, DIM, CASE}
+                                       x::AbstractArray{S, N},
+                                        ::Val{DIM}=Val(1)) where {T, S, N, WIDTH, DIM}
     # sanity checks
     N in 1:4 ||
         throw(ArgumentError("inconsistent array dimension"))
@@ -151,7 +150,7 @@ mul!(y, A, x, Val(2))
     Nq = __NS__[DIM]
 
     # stencil half width
-    hWIDTH = WIDTH >> 1 
+    hWIDTH = WIDTH >> 1
 
     # kernel expressions, starting at different locations
     head_kernel = _make_kernel(DIM, :(1),                WIDTH, N)
@@ -166,35 +165,35 @@ mul!(y, A, x, Val(2))
     # main for loop block
     block =
         if N == 1
-            head_part = (:h in CASE) ? :(for i = $head_range; $head_kernel; end) : :()
-            body_part = (:b in CASE) ? :(for i = $body_range; $body_kernel; end) : :()
-            tail_part = (:t in CASE) ? :(for i = $tail_range; $tail_kernel; end) : :()
+            head_part = :(for i = $head_range; $head_kernel; end)
+            body_part = :(for i = $body_range; $body_kernel; end)
+            tail_part = :(for i = $tail_range; $tail_kernel; end)
             quote
                 $head_part; $body_part; $tail_part
             end
         elseif N == 2
             if DIM == 1
-                head_part = (:h in CASE) ? :(for i = $head_range; $head_kernel; end) : :()
-                body_part = (:b in CASE) ? :(for i = $body_range; $body_kernel; end) : :()
-                tail_part = (:t in CASE) ? :(for i = $tail_range; $tail_kernel; end) : :()
+                head_part = :(for i = $head_range; $head_kernel; end)
+                body_part = :(for i = $body_range; $body_kernel; end)
+                tail_part = :(for i = $tail_range; $tail_kernel; end)
                 quote
                     for j = 1:N2
                         $head_part; $body_part; $tail_part
                     end
                 end
             else # DIM == 2
-                head_part = (:h in CASE) ? :(for j = $head_range; for i = 1:N1; $head_kernel; end; end) : :()
-                body_part = (:b in CASE) ? :(for j = $body_range; for i = 1:N1; $body_kernel; end; end) : :()
-                tail_part = (:t in CASE) ? :(for j = $tail_range; for i = 1:N1; $tail_kernel; end; end) : :()
+                head_part = :(for j = $head_range; for i = 1:N1; $head_kernel; end; end)
+                body_part = :(for j = $body_range; for i = 1:N1; $body_kernel; end; end)
+                tail_part = :(for j = $tail_range; for i = 1:N1; $tail_kernel; end; end)
                 quote
                     $head_part; $body_part; $tail_part
                 end
             end
         elseif N == 3
             if DIM == 1
-                head_part = (:h in CASE) ? :(for i = $head_range; $head_kernel; end) : :()
-                body_part = (:b in CASE) ? :(for i = $body_range; $body_kernel; end) : :()
-                tail_part = (:t in CASE) ? :(for i = $tail_range; $tail_kernel; end) : :()
+                head_part = :(for i = $head_range; $head_kernel; end)
+                body_part = :(for i = $body_range; $body_kernel; end)
+                tail_part = :(for i = $tail_range; $tail_kernel; end)
                 quote
                     for k = 1:N3
                         for j = 1:N2
@@ -203,63 +202,63 @@ mul!(y, A, x, Val(2))
                     end
                 end
             elseif DIM == 2
-                head_part = (:h in CASE) ? :(for j = $head_range; for i = 1:N1; $head_kernel; end; end) : :()
-                body_part = (:b in CASE) ? :(for j = $body_range; for i = 1:N1; $body_kernel; end; end) : :()
-                tail_part = (:t in CASE) ? :(for j = $tail_range; for i = 1:N1; $tail_kernel; end; end) : :()
+                head_part = :(for j = $head_range; for i = 1:N1; $head_kernel; end; end)
+                body_part = :(for j = $body_range; for i = 1:N1; $body_kernel; end; end)
+                tail_part = :(for j = $tail_range; for i = 1:N1; $tail_kernel; end; end)
                 quote
                     for k = 1:N3
                         $head_part; $body_part; $tail_part
                     end
                 end
             else # DIM == 3
-                head_part = (:h in CASE) ? :(for k = $head_range, j = 1:N2, i = 1:N1; $head_kernel; end) : :()
-                body_part = (:b in CASE) ? :(for k = $body_range, j = 1:N2, i = 1:N1; $body_kernel; end) : :()
-                tail_part = (:t in CASE) ? :(for k = $tail_range, j = 1:N2, i = 1:N1; $tail_kernel; end) : :()
+                head_part = :(for k = $head_range, j = 1:N2, i = 1:N1; $head_kernel; end)
+                body_part = :(for k = $body_range, j = 1:N2, i = 1:N1; $body_kernel; end)
+                tail_part = :(for k = $tail_range, j = 1:N2, i = 1:N1; $tail_kernel; end)
                 quote
                     $head_part; $body_part; $tail_part
                 end
             end
         else # N == 4
             if DIM == 1
-                head_part = (:h in CASE) ? :(for i = $head_range; $head_kernel; end) : :()
-                body_part = (:b in CASE) ? :(for i = $body_range; $body_kernel; end) : :()
-                tail_part = (:t in CASE) ? :(for i = $tail_range; $tail_kernel; end) : :()
+                head_part = :(for i = $head_range; $head_kernel; end)
+                body_part = :(for i = $body_range; $body_kernel; end)
+                tail_part = :(for i = $tail_range; $tail_kernel; end)
                 quote
                     for l = 1:N4, k = 1:N3, j = 1:N2
                         $head_part; $body_part; $tail_part
                     end
                 end
             elseif DIM == 2
-                head_part = (:h in CASE) ? :(for j = $head_range, i = 1:N1; $head_kernel; end) : :()
-                body_part = (:b in CASE) ? :(for j = $body_range, i = 1:N1; $body_kernel; end) : :()
-                tail_part = (:t in CASE) ? :(for j = $tail_range, i = 1:N1; $tail_kernel; end) : :()
+                head_part = :(for j = $head_range, i = 1:N1; $head_kernel; end)
+                body_part = :(for j = $body_range, i = 1:N1; $body_kernel; end)
+                tail_part = :(for j = $tail_range, i = 1:N1; $tail_kernel; end)
                 quote
                     for l = 1:N4, k = 1:N3
                         $head_part; $body_part; $tail_part
                     end
                 end
             elseif DIM == 3
-                head_part = (:h in CASE) ? :(for k = $head_range, j = 1:N2, i = 1:N1; $head_kernel; end) : :()
-                body_part = (:b in CASE) ? :(for k = $body_range, j = 1:N2, i = 1:N1; $body_kernel; end) : :()
-                tail_part = (:t in CASE) ? :(for k = $tail_range, j = 1:N2, i = 1:N1; $tail_kernel; end) : :()
+                head_part = :(for k = $head_range, j = 1:N2, i = 1:N1; $head_kernel; end)
+                body_part = :(for k = $body_range, j = 1:N2, i = 1:N1; $body_kernel; end)
+                tail_part = :(for k = $tail_range, j = 1:N2, i = 1:N1; $tail_kernel; end)
                 quote
                     for l = 1:N4
                         $head_part; $body_part; $tail_part
                     end
                 end
             else # DIM == 4
-                head_part = (:h in CASE) ? :(for l = $head_range, k = 1:N3, j = 1:N2, i = 1:N1; $head_kernel; end) : :()
-                body_part = (:b in CASE) ? :(for l = $body_range, k = 1:N3, j = 1:N2, i = 1:N1; $body_kernel; end) : :()
-                tail_part = (:t in CASE) ? :(for l = $tail_range, k = 1:N3, j = 1:N2, i = 1:N1; $tail_kernel; end) : :()
+                head_part = :(for l = $head_range, k = 1:N3, j = 1:N2, i = 1:N1; $head_kernel; end)
+                body_part = :(for l = $body_range, k = 1:N3, j = 1:N2, i = 1:N1; $body_kernel; end)
+                tail_part = :(for l = $tail_range, k = 1:N3, j = 1:N2, i = 1:N1; $tail_kernel; end)
                 quote
                     $head_part; $body_part; $tail_part
                 end
             end
         end
-        
+
     # define N1, N2, ...
     Ni = [Symbol(:N, d) for d in 1:N]
-    
+
     return quote
         # check sizes match along the dimension we differentiate along
         size(x, $DIM) == size(y, $DIM) == size(A.coeffs, 2) ||
@@ -272,7 +271,7 @@ mul!(y, A, x, Val(2))
         @inbounds begin
             $block
         end
-        
+
         return y
     end
 end
