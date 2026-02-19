@@ -297,3 +297,89 @@ end
         return val
     end
 end
+
+
+
+# TODO: does @inline speed this up?
+@generated function _my_head_mul!(y::AbstractVector{T},
+                                  A::DiffMatrix{T, WIDTH},
+                                  x::AbstractVector{T}) where {T, WIDTH}
+    return quote
+        for i in 1:$(WIDTH >> 1)
+            s = A.coeffs[1, i]*x[1]
+            Base.Cartesian.@nexprs $(WIDTH-1) p -> begin
+                s += A[1 + p, i]*x[1 + p]
+            end
+            $y[i] = s
+        end
+        return $y
+    end
+end
+
+@generated function _my_body_mul!(y::AbstractVector{T},
+                                  A::DiffMatrix{T, WIDTH},
+                                  x::AbstractVector{T},
+                             offset::Int,
+                                rng::UnitRange{Int}) where {T, WIDTH}
+    return quote
+        for i in $rng
+            left = i - $(WIDTH >> 1)
+            s = A.coeffs[1, $offset + i]*x[left]
+            Base.Cartesian.@nexprs $(WIDTH-1) p -> begin
+                s += A[1 + p, $offset + i]*x[left + p]
+            end
+            $y[i] = s
+        end
+        return $y
+    end
+end
+
+@generated function _my_tail_mul!(y::AbstractVector{T},
+                                  A::DiffMatrix{T, WIDTH},
+                                  x::AbstractVector{T},
+                             offset::Int) where {T, WIDTH}
+    return quote
+        N = length($y)
+        for i in (N - $(WIDTH >> 1) + 1):N
+            left = i - $(WIDTH >> 1)
+            s = A.coeffs[1, $offset + i]*x[left]
+            Base.Cartesian.@nexprs $(WIDTH-1) p -> begin
+                s += A[1 + p, $offset + i]*x[left + p]
+            end
+            $y[i] = s
+        end
+        return $y
+    end
+end
+
+@generated function _my_mul!(y::AbstractVector{T},
+                             A::DiffMatrix{T, WIDTH},
+                             x::AbstractVector{T},
+                              ::Val{OFFSET},
+                              ::Val{RNG},
+                              ::Val{REGION}) where {T, WIDTH, OFFSET, RNG, REGION}
+    # get correct expression for given region
+    block =
+        if REGION == :hb
+            quote
+                _my_head_mul!($y, $A, $x)
+                _my_body_mul!($y, $A, $x, 0, $(WIDTH >> 1) + 1:$RNG[end])
+            end
+        elseif REGION == :b
+            quote
+                _my_body_mul!($y, $A, $x, $OFFSET, $RNG)
+            end
+        elseif REGION == :bt
+            quote
+                _my_body_mul!($y, $A, $x, $OFFSET, $RNG[1]:($(length(y)) - $(WIDTH >> 1)))
+                _my_tail_mul!($y, $A, $x, $OFFSET)
+            end
+        else
+            throw(ArgumentError("region has to be :hb, :b, or :bt"))
+        end
+
+    return quote
+        $block
+        return $y
+    end
+end
