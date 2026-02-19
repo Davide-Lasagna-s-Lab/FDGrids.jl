@@ -7,7 +7,7 @@ using Printf
 #  Configuration
 # ================================================================
 
-const SIZES = [64, 128, 256]
+const SIZES = [32, 64, 128]
 const WIDTH = 5
 const ORDER = 1
 
