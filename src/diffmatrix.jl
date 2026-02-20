@@ -1,93 +1,89 @@
-struct DiffMatrix{T, WIDTH, OPTIMISE} <: AbstractMatrix{T}
-    coeffs::Matrix{T} # finite difference weights
-      buff::Vector{T} # small buffer for the matvec code
-    function DiffMatrix(xs::AbstractVector, width::Int, order::Int, optimise::Bool=true, ::Type{T}=Float64) where {T}
-        # checks
-        3 ≤ width || throw(ArgumentError("width must be greater than 3"))
-        width % 2 == 1 || throw(ArgumentError("width must be odd"))
-        width ≤ length(xs) || throw(ArgumentError("width must not be greater than number of grid points "))
+struct DiffMatrix{T, WIDTH, OPTIMISE, A<:AbstractMatrix{T}} <: AbstractMatrix{T}
+    coeffs :: A   # finite difference weights — Matrix{T} on CPU, CuMatrix{T} on GPU
 
-        # Compute the coefficients of the differentiation matrix. Coefficients
-        # are organised in row major format, i.e, the first column contains the
-        # weights of the finite difference approximation of the derivative at
-        # the first grid point.
-        coeffs = get_coeffs(xs, width, order)
+    """
+        DiffMatrix(xs, width, order; optimise=true, eltype=Float64)
 
-        return new{T, width, optimise}(T.(coeffs), zeros(T, width))
+    Construct a finite-difference differentiation matrix on `xs` of the given
+    stencil `width` and derivative `order`. Always constructs on the CPU —
+    use `CUDA.cu(d)` to move to the GPU (requires CUDA.jl).
+
+    # Keyword Arguments
+    - `optimise::Bool=true`: pre-invert the diagonal of U during LU factorisation.
+    - `eltype::Type=Float64`: element type of the coefficients.
+    """
+    function DiffMatrix(xs::AbstractVector, width::Int, order::Int;
+                        optimise::Bool = true,
+                        eltype::Type   = Float64)
+        3 ≤ width          || throw(ArgumentError("width must be greater than 3"))
+        width % 2 == 1     || throw(ArgumentError("width must be odd"))
+        width ≤ length(xs) || throw(ArgumentError("width must not be greater than number of grid points"))
+
+        coeffs = eltype.(get_coeffs(xs, width, order))
+
+        return new{eltype, width, optimise, typeof(coeffs)}(coeffs)
     end
+
+    # Internal constructor: wraps an existing coeffs array directly.
+    # Used by copy() and similar() — not part of the public API.
+    DiffMatrix{T, WIDTH, OPTIMISE, A}(coeffs::A) where {T, WIDTH, OPTIMISE, A<:AbstractMatrix{T}} =
+        new{T, WIDTH, OPTIMISE, A}(coeffs)
 end
 
 Base.size(d::DiffMatrix) = (size(d.coeffs, 2), size(d.coeffs, 2))
 Base.IndexStyle(d::DiffMatrix) = IndexCartesian()
 
+# NOTE: when coeffs is a CuMatrix, each getindex/setindex! call does a scalar
+# device-to-host memory transfer — correct but very slow. These methods are
+# CPU-only operations (indexing, full(), linalg.jl) and should never be called
+# in a hot loop on a GPU DiffMatrix.
 function Base.getindex(d::DiffMatrix{T, WIDTH}, i::Int, j::Int) where {T, WIDTH}
-    # global to local indices mapping
     offset = i ≤              WIDTH >> 1 ?          WIDTH>>1 - i + 1 :
              i > size(d, 1) - WIDTH >> 1 ? size(d, 1) - WIDTH>>1 - i : 0
     m, n = WIDTH>>1 + j - i + 1 - offset, i
-    
-    # return
     return checkbounds(Bool, d.coeffs, m, n) ? d.coeffs[m, n] : zero(T)
 end
 
 function Base.setindex!(d::DiffMatrix{T, WIDTH}, v, i::Int, j::Int) where {T, WIDTH}
-    # global to local indices mapping
     offset = i ≤              WIDTH >> 1 ?          WIDTH>>1 - i + 1 :
              i > size(d, 1) - WIDTH >> 1 ? size(d, 1) - WIDTH>>1 - i : 0
     m, n = WIDTH>>1 + j - i + 1 - offset, i
-    
-    # return
     return checkbounds(Bool, d.coeffs, m, n) ? (d.coeffs[m, n] = T(v)) : T(v)
 end
 
-function Base.similar(d::DiffMatrix{T, WIDTH, OPTIMISE}, ::Type{S}=T, _size::Tuple{Vararg{Int64,2}}=size(d)) where {T, S, WIDTH, OPTIMISE}
-    return DiffMatrix(zeros(Float64, _size[1]), WIDTH, 1, OPTIMISE, S)
-end
+Base.similar(d::DiffMatrix{T, WIDTH, OPTIMISE, A}, ::Type{S}=T) where {T, S, WIDTH, OPTIMISE, A} =
+    DiffMatrix{S, WIDTH, OPTIMISE, A}(similar(d.coeffs, S))
 
-function Base.copy(d::DiffMatrix{T, WIDTH}) where {T, WIDTH}
-    d_ = similar(d)
-    d_.coeffs .= d.coeffs
-    return d_
-end
+Base.copy(d::DiffMatrix{T, WIDTH, OPTIMISE, A}) where {T, WIDTH, OPTIMISE, A} =
+    DiffMatrix{T, WIDTH, OPTIMISE, A}(copy(d.coeffs))
 
 function full(A::DiffMatrix{T, WIDTH}) where {T, WIDTH}
-    N = size(A.coeffs, 2)
+    N = size(A, 1)
     out = zeros(T, N, N)
-    @simd for i = 1:N
-        # index of the first element of the stencil
-        left = clamp(i - (WIDTH>>1), 1, N -WIDTH + 1)
-
-        # expand expressions
-        for p = 1:WIDTH
-            out[i, left+p-1] = A.coeffs[p, i]
-        end
+    for i = 1:N, j = 1:N
+        out[i, j] = A[i, j]
     end
     return out
 end
 
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# broadcasting style
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Broadcasting — CPU only. GPU differentiation goes through mul! dispatch.
 struct DiffMatrixStyle{T, WIDTH, OPTIMISE} <: Broadcast.BroadcastStyle end
-Base.BroadcastStyle(::Type{<:DiffMatrix{T, WIDTH, OPTIMISE}}) where {T, WIDTH, OPTIMISE} = DiffMatrixStyle{T, WIDTH, OPTIMISE}()
 
-# allows broadcasting with numbers
-Base.BroadcastStyle( ::Base.Broadcast.DefaultArrayStyle{0}, 
-                    s::DiffMatrixStyle{T, WIDTH, OPTIMISE}) where {T, WIDTH, OPTIMISE} = s
+# main broadcasting entry point
+Base.BroadcastStyle(::Type{<:DiffMatrix{T, WIDTH, OPTIMISE, <:Matrix}}) where {T, WIDTH, OPTIMISE} =
+    DiffMatrixStyle{T, WIDTH, OPTIMISE}()
 
-# allows broadcasting with vectors
-Base.BroadcastStyle( ::Base.Broadcast.DefaultArrayStyle{1}, 
-                    s::DiffMatrixStyle{T, WIDTH, OPTIMISE}) where {T, WIDTH, OPTIMISE} = s
+# broadcast with scalar: α * D
+Base.BroadcastStyle(::Base.Broadcast.DefaultArrayStyle{0}, s::DiffMatrixStyle) = s
 
-# allow broadcasting with diagonal matrices (but only diagonal * )
-Base.BroadcastStyle( ::LinearAlgebra.StructuredMatrixStyle{<:LinearAlgebra.Diagonal},
-                    s::DiffMatrixStyle{T, WIDTH, OPTIMISE}) where {T, WIDTH, OPTIMISE} = s
+# broadcast with another matrix: D1 + D2 (but no D1 * D2)
+Base.BroadcastStyle(::LinearAlgebra.StructuredMatrixStyle{<:LinearAlgebra.Diagonal}, s::DiffMatrixStyle) = s
 
-# operations with diff matrices of different width but same type
-Base.BroadcastStyle(::DiffMatrixStyle{T1, WIDTH1, OPTIMISE}, ::DiffMatrixStyle{T2, WIDTH2, OPTIMISE}) where {T1, T2, WIDTH1, WIDTH2, OPTIMISE} = 
-    DiffMatrixStyle{promote_type(T1, T2), max(WIDTH1, WIDTH2), OPTIMISE}()
+# broadcast with diffent parameters
+Base.BroadcastStyle(::DiffMatrixStyle{T1, W1, O1}, ::DiffMatrixStyle{T2, W2, O2}) where {T1, T2, W1, W2, O1, O2} =
+    DiffMatrixStyle{promote_type(T1, T2), max(W1, W2), O1 || O2}()
 
-# use broadcasting
-function Base.similar(bc::Base.Broadcast.Broadcasted{<:DiffMatrixStyle{T, WIDTH, OPTIMISE}}, ::Type{S}) where {T, WIDTH, OPTIMISE, S}
-    s = axes(bc)[1][end]
-    DiffMatrix(zeros(Float64, s), WIDTH, 1, OPTIMISE, S)
-end
+# allocate new output
+Base.similar(bc::Base.Broadcast.Broadcasted{DiffMatrixStyle{T, WIDTH, OPTIMISE}}, ::Type{S}) where {T, WIDTH, OPTIMISE, S} =
+    DiffMatrix{S, WIDTH, OPTIMISE, Matrix{S}}(Matrix{S}(undef, WIDTH, axes(bc)[1][end]))
