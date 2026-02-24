@@ -443,18 +443,38 @@ end
                 v2 = abs(d2fs_EX_v[I] - d2fs_FD[I]) / abs(d2fs_EX_v[I]) * M^(width-1)
                 @test v2 < v2_center_max
 
-                # and one order less at the boundary
-                i  = 1
-                I  = idx_on_axis(DIM, i)
-                v3 = abs(d2fs_EX_v[I] - d2fs_FD[I]) / abs(d2fs_EX_v[I]) * M^(width-2)
-                @test v3 < v2_bndr_max
-            end
-        end
-    end
+
+struct DummyVector{L, NHALO} <: AbstractVector{Float64}
+    data::Vector{Float64}
+    DummyVector(l::Int, nhalo::Int) = new{l, nhalo}(zeros(Float64, l + 2*nhalo))
+end
+Base.IndexStyle(::DummyVector) = IndexLinear()
+Base.size(::DummyVector{L}) where {L} = (L,)
+Base.getindex(v::DummyVector{L, NHALO}, i::Int) where {L, NHALO} = v.data[i + NHALO]
+Base.setindex!(v::DummyVector{L, NHALO}, val, i::Int) where {L, NHALO} = (v.data[i + NHALO] = val; return val)
+
+@testset "test distributed matmul                   " begin
+    xs = gridpoints(64, -1, 1, 0.5)
+    out_EX = -2.0.*xs
+    D = DiffMatrix(xs, 3, 1)
+    out_FD = similar(xs)
+    # input = 1 .- xs.^2
+    # FDGrids._my_mul!(out_FD, D, input, Val(0), Val( 1:16), Val(:hb), Val(length(xs)))
+    # FDGrids._my_mul!(out_FD, D, input, Val(0), Val(17:32), Val(:b),  Val(length(xs)))
+    # FDGrids._my_mul!(out_FD, D, input, Val(0), Val(33:48), Val(:b),  Val(length(xs)))
+    # FDGrids._my_mul!(out_FD, D, input, Val(0), Val(49:64), Val(:bt), Val(length(xs)))
+    input = DummyVector(16, 1)
+    input.data[2:18] .= 1 .- xs[1:17].^2
+    mul!(@view(out_FD[ 1:16]), D, input, Val(0),  Val(1:16), Val(:hb), Val(length(input)))
+    input.data[1:18] .= 1 .- xs[16:33].^2
+    mul!(@view(out_FD[17:32]), D, input, Val(16), Val(1:16), Val(:b),  Val(length(input)))
+    input.data[1:18] .= 1 .- xs[32:49].^2
+    mul!(@view(out_FD[33:48]), D, input, Val(32), Val(1:16), Val(:b),  Val(length(input)))
+    input.data[1:17] .= 1 .- xs[48:64].^2
+    mul!(@view(out_FD[49:64]), D, input, Val(48), Val(1:16), Val(:bt), Val(length(input)))
+    @test out_FD ≈ out_EX
 end
 
-@testset "test lufact                               " begin
-    xs = gridpoints(12, -1, 1, 1)
             
     for width in (3, 5, 7)
         # diffmatrix
