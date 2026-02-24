@@ -465,13 +465,19 @@ Base.setindex!(v::DummyVector{L, NHALO}, val, i::Int) where {L, NHALO} = (v.data
     # FDGrids._my_mul!(out_FD, D, input, Val(0), Val(49:64), Val(:bt), Val(length(xs)))
     input = DummyVector(16, 1)
     input.data[2:18] .= 1 .- xs[1:17].^2
-    mul!(@view(out_FD[ 1:16]), D, input, Val(0),  Val(1:16), Val(:hb), Val(length(input)))
+    mul!(@view(out_FD[ 1:16]), D, input, Val(0), Val(4), Val( 1:15), Val(length(input)))
+    mul!(@view(out_FD[ 1:16]), D, input, Val(0), Val(4), Val(16:16), Val(length(input)))
     input.data[1:18] .= 1 .- xs[16:33].^2
-    mul!(@view(out_FD[17:32]), D, input, Val(16), Val(1:16), Val(:b),  Val(length(input)))
+    mul!(@view(out_FD[17:32]), D, input, Val(1), Val(4), Val( 1:1 ), Val(length(input)))
+    mul!(@view(out_FD[17:32]), D, input, Val(1), Val(4), Val( 2:15), Val(length(input)))
+    mul!(@view(out_FD[17:32]), D, input, Val(1), Val(4), Val(16:16), Val(length(input)))
     input.data[1:18] .= 1 .- xs[32:49].^2
-    mul!(@view(out_FD[33:48]), D, input, Val(32), Val(1:16), Val(:b),  Val(length(input)))
+    mul!(@view(out_FD[33:48]), D, input, Val(2), Val(4), Val( 1:1 ), Val(length(input)))
+    mul!(@view(out_FD[33:48]), D, input, Val(2), Val(4), Val( 2:15), Val(length(input)))
+    mul!(@view(out_FD[33:48]), D, input, Val(2), Val(4), Val(16:16), Val(length(input)))
     input.data[1:17] .= 1 .- xs[48:64].^2
-    mul!(@view(out_FD[49:64]), D, input, Val(48), Val(1:16), Val(:bt), Val(length(input)))
+    mul!(@view(out_FD[49:64]), D, input, Val(3), Val(4), Val(1:1 ), Val(length(input)))
+    mul!(@view(out_FD[49:64]), D, input, Val(3), Val(4), Val(2:16), Val(length(input)))
     @test out_FD ≈ out_EX
 end
 

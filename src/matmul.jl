@@ -303,31 +303,32 @@ end
 @generated function LinearAlgebra.mul!(y::AbstractVector{T},
                                        A::DiffMatrix{T, WIDTH},
                                        x::AbstractVector{T},
-                                        ::Val{OFFSET},
+                                        ::Val{RANK},
+                                        ::Val{NP},
                                         ::Val{RNG},
-                                        ::Val{REGION},
-                                        ::Val{LENGTH}) where {T, WIDTH, OFFSET, RNG, REGION, LENGTH}
+                                        ::Val{LENGTH}) where {T, WIDTH, RANK, NP, RNG, LENGTH}
+    # safety checks
+    0 <= RANK < NP || throw(ArgumentError("Rank argument not valid"))
+
     # get correct expression for given region
     block =
-        if REGION == :hb
+        if RANK == 0
             head_kernel = _my_head_mul!(WIDTH)
             body_kernel = _my_body_mul!(WIDTH, 0, (WIDTH >> 1) + 1:RNG[end])
             quote
                 $head_kernel; $body_kernel
             end
-        elseif REGION == :b
-            body_kernel = _my_body_mul!(WIDTH, OFFSET, RNG)
-            quote
-                $body_kernel
-            end
-        elseif REGION == :bt
-            body_kernel = _my_body_mul!(WIDTH, OFFSET, RNG[1]:(LENGTH - (WIDTH >> 1)))
-            tail_kernel = _my_tail_mul!(WIDTH, LENGTH, OFFSET)
+        elseif RANK == NP - 1
+            body_kernel = _my_body_mul!(WIDTH, RANK*LENGTH, RNG[1]:(LENGTH - (WIDTH >> 1)))
+            tail_kernel = _my_tail_mul!(WIDTH, LENGTH, RANK*LENGTH)
             quote
                 $body_kernel; $tail_kernel
             end
         else
-            throw(ArgumentError("region has to be :hb, :b, or :bt"))
+            body_kernel = _my_body_mul!(WIDTH, RANK*LENGTH, RNG)
+            quote
+                $body_kernel
+            end
         end
 
     output = quote
