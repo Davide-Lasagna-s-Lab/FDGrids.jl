@@ -300,9 +300,9 @@ end
 
 
 
-@generated function LinearAlgebra.mul!(y::AbstractVector{T},
+@generated function LinearAlgebra.mul!(y::AbstractArray{T, 4},
                                        A::DiffMatrix{T, WIDTH},
-                                       x::AbstractVector{T},
+                                       x::AbstractArray{T, 4},
                                         ::Val{RANK},
                                         ::Val{NP},
                                         ::Val{RNG},
@@ -316,24 +316,41 @@ end
             head_kernel = _my_head_mul!(WIDTH)
             body_kernel = _my_body_mul!(WIDTH, 0, (WIDTH >> 1) + 1:RNG[end])
             quote
-                $head_kernel; $body_kernel
+                for l in 1:N4, k in 1:N3, j in 1:N2
+                    $head_kernel; $body_kernel
+                end
             end
         elseif RANK == NP - 1
             body_kernel = _my_body_mul!(WIDTH, RANK*LENGTH, RNG[1]:(LENGTH - (WIDTH >> 1)))
             tail_kernel = _my_tail_mul!(WIDTH, LENGTH, RANK*LENGTH)
             quote
-                $body_kernel; $tail_kernel
+                for l in 1:N4, k in 1:N3, j in 1:N2
+                    $body_kernel; $tail_kernel
+                end
             end
         else
             body_kernel = _my_body_mul!(WIDTH, RANK*LENGTH, RNG)
             quote
-                $body_kernel
+                for l in 1:N4, k in 1:N3, j in 1:N2
+                    $body_kernel
+                end
             end
         end
 
+    # define N1, N2, N3, N4
+    Ni = [Symbol(:N, d) for d in 1:4]
+
     output = quote
-        $block
-        return $y
+        # size of array as a tuple, e.g.
+        # N1, N2, N3 = size(y)
+        $(Expr(:(=), Expr(:tuple, Ni...), :(size(y))))
+
+        # main differentiation loop
+        @inbounds begin
+            $block
+        end
+
+        return y
     end
 
     return output
@@ -342,11 +359,11 @@ end
 function _my_head_mul!(WIDTH)
     return quote
         for i in 1:$(WIDTH >> 1)
-            s = A.coeffs[1, i]*x[1]
+            s = A.coeffs[1, i]*x[1, j, k, l]
             Base.Cartesian.@nexprs $(WIDTH-1) p -> begin
-                s += A.coeffs[1 + p, i]*x[1 + p]
+                s += A.coeffs[1 + p, i]*x[1 + p, j, k, l]
             end
-            y[i] = s
+            y[i, j, k, l] = s
         end
     end
 end
@@ -355,11 +372,11 @@ function _my_body_mul!(WIDTH, OFFSET, RNG)
     return quote
         for i in $RNG
             left = i - $(WIDTH >> 1)
-            s = A.coeffs[1, $OFFSET + i]*x[left]
+            s = A.coeffs[1, $OFFSET + i]*x[left, j, k, l]
             Base.Cartesian.@nexprs $(WIDTH-1) p -> begin
-                s += A.coeffs[1 + p, $OFFSET + i]*x[left + p]
+                s += A.coeffs[1 + p, $OFFSET + i]*x[left + p, j, k, l]
             end
-            y[i] = s
+            y[i, j, k, l] = s
         end
     end
 end
@@ -368,11 +385,11 @@ function _my_tail_mul!(WIDTH, N, OFFSET)
     return quote
         for i in $(N - (WIDTH >> 1) + 1):$N
             left = i - $(WIDTH) + 1
-            s = A.coeffs[1, $OFFSET + i]*x[left]
+            s = A.coeffs[1, $OFFSET + i]*x[left, j, k, l]
             Base.Cartesian.@nexprs $(WIDTH-1) p -> begin
-                s += A.coeffs[1 + p, $OFFSET + i]*x[left + p]
+                s += A.coeffs[1 + p, $OFFSET + i]*x[left + p, j, k, l]
             end
-            y[i] = s
+            y[i, j, k, l] = s
         end
     end
 end

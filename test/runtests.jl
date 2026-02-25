@@ -443,41 +443,35 @@ end
                 v2 = abs(d2fs_EX_v[I] - d2fs_FD[I]) / abs(d2fs_EX_v[I]) * M^(width-1)
                 @test v2 < v2_center_max
 
-
-struct DummyVector{L, NHALO} <: AbstractVector{Float64}
-    data::Vector{Float64}
-    DummyVector(l::Int, nhalo::Int) = new{l, nhalo}(zeros(Float64, l + 2*nhalo))
+struct DummyVector{SHAPE, NHALO} <: AbstractArray{Float64, 4}
+    data::Array{Float64, 4}
+    DummyVector(shape::NTuple{4, Int}, nhalo::Int) = new{shape, nhalo}(zeros(Float64, shape[1] + 2*nhalo, shape[2:end]...))
 end
 Base.IndexStyle(::DummyVector) = IndexLinear()
-Base.size(::DummyVector{L}) where {L} = (L,)
-Base.getindex(v::DummyVector{L, NHALO}, i::Int) where {L, NHALO} = v.data[i + NHALO]
-Base.setindex!(v::DummyVector{L, NHALO}, val, i::Int) where {L, NHALO} = (v.data[i + NHALO] = val; return val)
+Base.size(::DummyVector{SHAPE}) where {SHAPE} = SHAPE
+Base.getindex(v::DummyVector{SHAPE, NHALO}, I::Vararg{Int, 4}) where {SHAPE, NHALO} = v.data[I[1]+NHALO, I[2:end]...]
+Base.setindex!(v::DummyVector{SHAPE, NHALO}, val, I::Vararg{Int, 4}) where {SHAPE, NHALO} = (v.data[I[1]+NHALO, I[2:end]...] = val; return val)
 
 @testset "test distributed matmul                   " begin
-    xs = gridpoints(64, -1, 1, 0.5)
+    xs = repeat(gridpoints(64, -1, 1, 0.5), inner=(1, 2, 2, 2))
     out_EX = -2.0.*xs
-    D = DiffMatrix(xs, 3, 1)
-    out_FD = similar(xs)
-    # input = 1 .- xs.^2
-    # FDGrids._my_mul!(out_FD, D, input, Val(0), Val( 1:16), Val(:hb), Val(length(xs)))
-    # FDGrids._my_mul!(out_FD, D, input, Val(0), Val(17:32), Val(:b),  Val(length(xs)))
-    # FDGrids._my_mul!(out_FD, D, input, Val(0), Val(33:48), Val(:b),  Val(length(xs)))
-    # FDGrids._my_mul!(out_FD, D, input, Val(0), Val(49:64), Val(:bt), Val(length(xs)))
-    input = DummyVector(16, 1)
-    input.data[2:18] .= 1 .- xs[1:17].^2
-    mul!(@view(out_FD[ 1:16]), D, input, Val(0), Val(4), Val( 1:15), Val(length(input)))
-    mul!(@view(out_FD[ 1:16]), D, input, Val(0), Val(4), Val(16:16), Val(length(input)))
-    input.data[1:18] .= 1 .- xs[16:33].^2
-    mul!(@view(out_FD[17:32]), D, input, Val(1), Val(4), Val( 1:1 ), Val(length(input)))
-    mul!(@view(out_FD[17:32]), D, input, Val(1), Val(4), Val( 2:15), Val(length(input)))
-    mul!(@view(out_FD[17:32]), D, input, Val(1), Val(4), Val(16:16), Val(length(input)))
-    input.data[1:18] .= 1 .- xs[32:49].^2
-    mul!(@view(out_FD[33:48]), D, input, Val(2), Val(4), Val( 1:1 ), Val(length(input)))
-    mul!(@view(out_FD[33:48]), D, input, Val(2), Val(4), Val( 2:15), Val(length(input)))
-    mul!(@view(out_FD[33:48]), D, input, Val(2), Val(4), Val(16:16), Val(length(input)))
-    input.data[1:17] .= 1 .- xs[48:64].^2
-    mul!(@view(out_FD[49:64]), D, input, Val(3), Val(4), Val(1:1 ), Val(length(input)))
-    mul!(@view(out_FD[49:64]), D, input, Val(3), Val(4), Val(2:16), Val(length(input)))
+    D = DiffMatrix(xs[:, 1, 1, 1], 3, 1)
+    out_FD = zero(xs)
+    input = DummyVector((16, 2, 2, 2), 1)
+    input.data[2:18, :, :, :] .= 1 .- xs[1:17, :, :, :].^2
+    mul!(@view(out_FD[ 1:16, :, :, :]), D, input, Val(0), Val(4), Val( 1:15), Val(size(input, 1)))
+    mul!(@view(out_FD[ 1:16, :, :, :]), D, input, Val(0), Val(4), Val(16:16), Val(size(input, 1)))
+    input.data[1:18, :, :, :] .= 1 .- xs[16:33].^2
+    mul!(@view(out_FD[17:32, :, :, :]), D, input, Val(1), Val(4), Val( 1:1 ), Val(size(input, 1)))
+    mul!(@view(out_FD[17:32, :, :, :]), D, input, Val(1), Val(4), Val( 2:15), Val(size(input, 1)))
+    mul!(@view(out_FD[17:32, :, :, :]), D, input, Val(1), Val(4), Val(16:16), Val(size(input, 1)))
+    input.data[1:18, :, :, :] .= 1 .- xs[32:49].^2
+    mul!(@view(out_FD[33:48, :, :, :]), D, input, Val(2), Val(4), Val( 1:1 ), Val(size(input, 1)))
+    mul!(@view(out_FD[33:48, :, :, :]), D, input, Val(2), Val(4), Val( 2:15), Val(size(input, 1)))
+    mul!(@view(out_FD[33:48, :, :, :]), D, input, Val(2), Val(4), Val(16:16), Val(size(input, 1)))
+    input.data[1:17, :, :, :] .= 1 .- xs[48:64].^2
+    mul!(@view(out_FD[49:64, :, :, :]), D, input, Val(3), Val(4), Val( 1:1 ), Val(size(input, 1)))
+    mul!(@view(out_FD[49:64, :, :, :]), D, input, Val(3), Val(4), Val( 2:16), Val(size(input, 1)))
     @test out_FD ≈ out_EX
 end
 
