@@ -299,43 +299,44 @@ end
 end
 
 
-# TODO: extend to handle N-dimensional input
 # TODO: implement and test new method for channel flow
 # TODO: benchmark resulting change
-@generated function LinearAlgebra.mul!(y::AbstractArray{T, 4},
+@generated function LinearAlgebra.mul!(y::AbstractArray{T, N},
                                        A::DiffMatrix{T, WIDTH},
-                                       x::AbstractArray{T, 4},
+                                       x::AbstractArray{T, N},
                                         ::Val{RANK},
                                         ::Val{NP},
                                         ::Val{RNG},
                                         ::Val{LENGTH},
-                                        ::Val{DIM}=Val(1)) where {T, WIDTH, DIM, RANK, NP, RNG, LENGTH}
+                                        ::Val{DIM}=Val(1)) where {T, N, WIDTH, DIM, RANK, NP, RNG, LENGTH}
     # safety checks
-    0 <= RANK < NP || throw(ArgumentError("Rank argument not valid"))
+    N   in 1:4     || throw(ArgumentError("invalid array dimension"))
+    DIM in 1:N     || throw(ArgumentError("inconsistent differentiation dimension"))
+    0 <= RANK < NP || throw(ArgumentError("rank argument not valid"))
 
     # get correct expression for given region
     block =
         if RANK == 0
-            head_kernel = RNG[1] <= WIDTH>>1 ? _my_head_mul!(WIDTH, DIM) : :()
-            body_kernel = _my_body_mul!(WIDTH, 0, intersect(RNG, (WIDTH >> 1) + 1:RNG[end]), DIM)
+            head_kernel = RNG[1] <= WIDTH>>1 ? _my_head_mul!(WIDTH, DIM, N) : :()
+            body_kernel = _my_body_mul!(WIDTH, 0, intersect(RNG, (WIDTH >> 1) + 1:RNG[end]), DIM, N)
             quote
                 $head_kernel; $body_kernel
             end
         elseif RANK == NP - 1
-            body_kernel = _my_body_mul!(WIDTH, RANK*LENGTH, intersect(RNG, RNG[1]:(LENGTH - (WIDTH >> 1))), DIM)
-            tail_kernel = RNG[end] > LENGTH-WIDTH>>1 ? _my_tail_mul!(WIDTH, LENGTH, RANK*LENGTH, DIM) : :()
+            body_kernel = _my_body_mul!(WIDTH, RANK*LENGTH, intersect(RNG, RNG[1]:(LENGTH - (WIDTH >> 1))), DIM, N)
+            tail_kernel = RNG[end] > LENGTH-WIDTH>>1 ? _my_tail_mul!(WIDTH, LENGTH, RANK*LENGTH, DIM, N) : :()
             quote
                 $body_kernel; $tail_kernel
             end
         else
-            body_kernel = _my_body_mul!(WIDTH, RANK*LENGTH, RNG, DIM)
+            body_kernel = _my_body_mul!(WIDTH, RANK*LENGTH, RNG, DIM, N)
             quote
                 $body_kernel
             end
         end
 
     # define N1, N2, N3, N4
-    Ni = [Symbol(:N, d) for d in 1:4]
+    Ni = [Symbol(:N, d) for d in 1:N]
 
     output = quote
         # size of array as a tuple, e.g.
@@ -353,44 +354,44 @@ end
     return output
 end
 
-function _my_head_mul!(WIDTH, DIM)
+function _my_head_mul!(WIDTH, DIM, N)
     block = quote
-        s = A.coeffs[1, $(__VARS__[DIM])] * $(_make_ref(:x, :(1), DIM, 4))
+        s = A.coeffs[1, $(__VARS__[DIM])] * $(_make_ref(:x, :(1), DIM, N))
         Base.Cartesian.@nexprs $(WIDTH-1) p -> begin
-            s += A.coeffs[1 + p, $(__VARS__[DIM])] * $(_make_ref(:x, :(1 + p), DIM, 4))
+            s += A.coeffs[1 + p, $(__VARS__[DIM])] * $(_make_ref(:x, :(1 + p), DIM, N))
         end
-        $(_make_ref(:y, __VARS__[DIM], DIM, 4)) = s
+        $(_make_ref(:y, __VARS__[DIM], DIM, N)) = s
     end
-    return _make_loop_expr(:(1:$(WIDTH >> 1)), DIM, block)
+    return _make_loop_expr(:(1:$(WIDTH >> 1)), DIM, N, block)
 end
 
-function _my_body_mul!(WIDTH, OFFSET, RNG, DIM)
+function _my_body_mul!(WIDTH, OFFSET, RNG, DIM, N)
     block = quote
         left = $(__VARS__[DIM]) - $(WIDTH >> 1)
-        s = A.coeffs[1, $OFFSET + $(__VARS__[DIM])] * $(_make_ref(:x, :(left), DIM, 4))
+        s = A.coeffs[1, $OFFSET + $(__VARS__[DIM])] * $(_make_ref(:x, :(left), DIM, N))
         Base.Cartesian.@nexprs $(WIDTH-1) p -> begin
-            s += A.coeffs[1 + p, $OFFSET + $(__VARS__[DIM])] * $(_make_ref(:x, :(left + p), DIM, 4))
+            s += A.coeffs[1 + p, $OFFSET + $(__VARS__[DIM])] * $(_make_ref(:x, :(left + p), DIM, N))
         end
-        $(_make_ref(:y, __VARS__[DIM], DIM, 4)) = s
+        $(_make_ref(:y, __VARS__[DIM], DIM, N)) = s
     end
-    return _make_loop_expr(:($RNG), DIM, block)
+    return _make_loop_expr(:($RNG), DIM, N, block)
 end
 
-function _my_tail_mul!(WIDTH, LENGTH, OFFSET, DIM)
+function _my_tail_mul!(WIDTH, LENGTH, OFFSET, DIM, N)
     block = quote
         left = $(__VARS__[DIM]) - $(WIDTH) + 1
-        s = A.coeffs[1, $OFFSET + $(__VARS__[DIM])] * $(_make_ref(:x, :(left), DIM, 4))
+        s = A.coeffs[1, $OFFSET + $(__VARS__[DIM])] * $(_make_ref(:x, :(left), DIM, N))
         Base.Cartesian.@nexprs $(WIDTH-1) p -> begin
-            s += A.coeffs[1 + p, $OFFSET + $(__VARS__[DIM])] * $(_make_ref(:x, :(left + p), DIM, 4))
+            s += A.coeffs[1 + p, $OFFSET + $(__VARS__[DIM])] * $(_make_ref(:x, :(left + p), DIM, N))
         end
-        $(_make_ref(:y, __VARS__[DIM], DIM, 4)) = s
+        $(_make_ref(:y, __VARS__[DIM], DIM, N)) = s
     end
-    return _make_loop_expr(:($(LENGTH - (WIDTH >> 1) + 1):$LENGTH), DIM, block)
+    return _make_loop_expr(:($(LENGTH - (WIDTH >> 1) + 1):$LENGTH), DIM, N, block)
 end
 
-function _make_loop_expr(rows, DIM, block)
+function _make_loop_expr(rows, DIM, N, block)
     # create loop head
-    Nd_loop_expr = [Expr(:(=), __VARS__[d], d==DIM ? rows : Expr(:call, :(:), 1, Symbol(:N, d))) for d in 4:-1:1]
+    Nd_loop_expr = [Expr(:(=), __VARS__[d], d==DIM ? rows : Expr(:call, :(:), 1, Symbol(:N, d))) for d in N:-1:1]
 
     # define and return full loop expressions
     return Expr(:for, Expr(:block, Nd_loop_expr...), block)
