@@ -69,11 +69,11 @@ The summation is unrolled at generation time using `Base.Cartesian.@nexprs`.
 Typical usage is to build three kernels for head/body/tail regions, with different
 `base` expressions, and splice them into the appropriate loop nests.
 """
-function _make_kernel(DIM, base, WIDTH, N)
+function _make_kernel(DIM, base, WIDTH, N, OFFSET)
     return quote
-        s = A.coeffs[1, $(__VARS__[DIM])] * $(_make_ref(:x, base, DIM, N))
+        s = A.coeffs[1, $OFFSET + $(__VARS__[DIM])] * $(_make_ref(:x, base, DIM, N))
         Base.Cartesian.@nexprs $(WIDTH-1) p -> begin
-            s += A.coeffs[1 + p, $(__VARS__[DIM])] * $(_make_ref(:x, :( ($base) + p), DIM, N))
+            s += A.coeffs[1 + p, $OFFSET + $(__VARS__[DIM])] * $(_make_ref(:x, :( ($base) + p), DIM, N))
         end
         $(_make_ref(:y, __VARS__[DIM], DIM, N)) = s
     end
@@ -153,9 +153,9 @@ mul!(y, A, x, Val(2))
     hWIDTH = WIDTH >> 1
 
     # kernel expressions, starting at different locations
-    head_kernel = _make_kernel(DIM, :(1),                WIDTH, N)
-    body_kernel = _make_kernel(DIM, :($q - $hWIDTH),     WIDTH, N)
-    tail_kernel = _make_kernel(DIM, :($Nq - $WIDTH + 1), WIDTH, N)
+    head_kernel = _make_kernel(DIM, :(1),                WIDTH, N, 0)
+    body_kernel = _make_kernel(DIM, :($q - $hWIDTH),     WIDTH, N, 0)
+    tail_kernel = _make_kernel(DIM, :($Nq - $WIDTH + 1), WIDTH, N, 0)
 
     # ranges for the head, body and tail regions
     head_range = :(1:$hWIDTH)
@@ -357,41 +357,10 @@ end
     return output
 end
 
-# TODO: replace body of these functions with _make_kernel?
-function _my_head_mul!(WIDTH, DIM, N)
-    block = quote
-        s = A.coeffs[1, $(__VARS__[DIM])] * $(_make_ref(:x, :(1), DIM, N))
-        Base.Cartesian.@nexprs $(WIDTH-1) p -> begin
-            s += A.coeffs[1 + p, $(__VARS__[DIM])] * $(_make_ref(:x, :(1 + p), DIM, N))
-        end
-        $(_make_ref(:y, __VARS__[DIM], DIM, N)) = s
-    end
-    return _make_loop_expr(:(1:$(WIDTH >> 1)), DIM, N, block)
-end
+_my_head_mul!(WIDTH, DIM, N) = _make_loop_expr(:(1:$(WIDTH >> 1)), DIM, N, _make_kernel(DIM, :(1), WIDTH, N, 0))
+_my_body_mul!(WIDTH, OFFSET, RNG, DIM, N) = _make_loop_expr(:($RNG), DIM, N, _make_kernel(DIM, :($(__VARS__[DIM]) - $(WIDTH >> 1)), WIDTH, N, OFFSET))
+_my_tail_mul!(WIDTH, LENGTH, OFFSET, DIM, N) = _make_loop_expr(:($(LENGTH - (WIDTH >> 1) + 1):$LENGTH), DIM, N, _make_kernel(DIM, :($(LENGTH - WIDTH + 1)), WIDTH, N, OFFSET))
 
-function _my_body_mul!(WIDTH, OFFSET, RNG, DIM, N)
-    block = quote
-        left = $(__VARS__[DIM]) - $(WIDTH >> 1)
-        s = A.coeffs[1, $OFFSET + $(__VARS__[DIM])] * $(_make_ref(:x, :(left), DIM, N))
-        Base.Cartesian.@nexprs $(WIDTH-1) p -> begin
-            s += A.coeffs[1 + p, $OFFSET + $(__VARS__[DIM])] * $(_make_ref(:x, :(left + p), DIM, N))
-        end
-        $(_make_ref(:y, __VARS__[DIM], DIM, N)) = s
-    end
-    return _make_loop_expr(:($RNG), DIM, N, block)
-end
-
-function _my_tail_mul!(WIDTH, LENGTH, OFFSET, DIM, N)
-    left = LENGTH - WIDTH + 1
-    block = quote
-        s = A.coeffs[1, $OFFSET + $(__VARS__[DIM])] * $(_make_ref(:x, :($left), DIM, N))
-        Base.Cartesian.@nexprs $(WIDTH-1) p -> begin
-            s += A.coeffs[1 + p, $OFFSET + $(__VARS__[DIM])] * $(_make_ref(:x, :($left + p), DIM, N))
-        end
-        $(_make_ref(:y, __VARS__[DIM], DIM, N)) = s
-    end
-    return _make_loop_expr(:($(LENGTH - (WIDTH >> 1) + 1):$LENGTH), DIM, N, block)
-end
 
 function _make_loop_expr(rows, DIM, N, block)
     # create loop head

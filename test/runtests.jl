@@ -443,6 +443,15 @@ end
                 v2 = abs(d2fs_EX_v[I] - d2fs_FD[I]) / abs(d2fs_EX_v[I]) * M^(width-1)
                 @test v2 < v2_center_max
 
+                # and one order less at the boundary
+                i  = 1
+                I  = idx_on_axis(DIM, i)
+                v3 = abs(d2fs_EX_v[I] - d2fs_FD[I]) / abs(d2fs_EX_v[I]) * M^(width-2)
+                @test v3 < v2_bndr_max
+            end
+        end
+    end
+end
 
 struct DummyVector{N, SHAPE, DIM, NHALO} <: AbstractArray{Float64, N}
     data::Array{Float64, N}
@@ -481,6 +490,8 @@ Base.setindex!(v::DummyVector{N, SHAPE, DIM, NHALO}, val, I::Vararg{Int, N}) whe
     @test out_FD ≈ out_EX
 end
 
+@testset "test lufact                               " begin
+    xs = gridpoints(12, -1, 1, 1)
             
     for width in (3, 5, 7)
         # diffmatrix
