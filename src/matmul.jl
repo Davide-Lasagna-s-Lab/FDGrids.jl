@@ -134,174 +134,25 @@ Differentiate a 3D field `x` along the second dimension:
 mul!(y, A, x, Val(2))
 ```
 """
-@generated function LinearAlgebra.mul!(y::AbstractArray{S, N},
-                                       A::DiffMatrix{T, WIDTH},
-                                       x::AbstractArray{S, N},
-                                        ::Val{DIM}=Val(1)) where {T, S, N, WIDTH, DIM}
-    # sanity checks
-    N in 1:4 ||
-        throw(ArgumentError("inconsistent array dimension"))
+function LinearAlgebra.mul!(y::AbstractArray{S, N},
+                            A::DiffMatrix{T, WIDTH},
+                            x::AbstractArray{S, N},
+                             ::Val{DIM}=Val(1)) where {T, S, N, WIDTH, DIM}
+    # check sizes match along the dimension we differentiate along
+    size(x, DIM) == size(y, DIM) == size(A.coeffs, 2) || throw(ArgumentError("inconsistent inputs size"))
 
-    DIM in 1:N ||
-        throw(ArgumentError("inconsistent differentiation dimension"))
-    
-    # array size of the dimension we differentiate along
-    q = __VARS__[DIM]
-    Nq = __NS__[DIM]
+    # perform multiplication
+    LinearAlgebra.mul!(y, A, x, Val(:hb), Val(0), Val(                        1:(WIDTH>>1)               ), Val(size(x, DIM)), Val(DIM))
+    LinearAlgebra.mul!(y, A, x, Val(:b ), Val(0), Val(           ((WIDTH>>1)+1):(size(x, DIM)-(WIDTH>>1))), Val(size(x, DIM)), Val(DIM))
+    LinearAlgebra.mul!(y, A, x, Val(:bt), Val(0), Val((size(x, DIM)-(WIDTH>>1)):size(x, DIM)             ), Val(size(x, DIM)), Val(DIM))
 
-    # stencil half width
-    hWIDTH = WIDTH >> 1
-
-    # kernel expressions, starting at different locations
-    head_kernel = _make_kernel(DIM, :(1),                WIDTH, N, 0)
-    body_kernel = _make_kernel(DIM, :($q - $hWIDTH),     WIDTH, N, 0)
-    tail_kernel = _make_kernel(DIM, :($Nq - $WIDTH + 1), WIDTH, N, 0)
-
-    # ranges for the head, body and tail regions
-    head_range = :(1:$hWIDTH)
-    body_range = :((1 + $hWIDTH):($Nq - $hWIDTH))
-    tail_range = :(($Nq - $hWIDTH + 1):$Nq)
-
-    # main for loop block
-    block =
-        if N == 1
-            head_part = :(for i = $head_range; $head_kernel; end)
-            body_part = :(for i = $body_range; $body_kernel; end)
-            tail_part = :(for i = $tail_range; $tail_kernel; end)
-            quote
-                $head_part; $body_part; $tail_part
-            end
-        elseif N == 2
-            if DIM == 1
-                head_part = :(for i = $head_range; $head_kernel; end)
-                body_part = :(for i = $body_range; $body_kernel; end)
-                tail_part = :(for i = $tail_range; $tail_kernel; end)
-                quote
-                    for j = 1:N2
-                        $head_part; $body_part; $tail_part
-                    end
-                end
-            else # DIM == 2
-                head_part = :(for j = $head_range; for i = 1:N1; $head_kernel; end; end)
-                body_part = :(for j = $body_range; for i = 1:N1; $body_kernel; end; end)
-                tail_part = :(for j = $tail_range; for i = 1:N1; $tail_kernel; end; end)
-                quote
-                    $head_part; $body_part; $tail_part
-                end
-            end
-        elseif N == 3
-            if DIM == 1
-                head_part = :(for i = $head_range; $head_kernel; end)
-                body_part = :(for i = $body_range; $body_kernel; end)
-                tail_part = :(for i = $tail_range; $tail_kernel; end)
-                quote
-                    for k = 1:N3
-                        for j = 1:N2
-                            $head_part; $body_part; $tail_part
-                        end
-                    end
-                end
-            elseif DIM == 2
-                head_part = :(for j = $head_range; for i = 1:N1; $head_kernel; end; end)
-                body_part = :(for j = $body_range; for i = 1:N1; $body_kernel; end; end)
-                tail_part = :(for j = $tail_range; for i = 1:N1; $tail_kernel; end; end)
-                quote
-                    for k = 1:N3
-                        $head_part; $body_part; $tail_part
-                    end
-                end
-            else # DIM == 3
-                head_part = :(for k = $head_range, j = 1:N2, i = 1:N1; $head_kernel; end)
-                body_part = :(for k = $body_range, j = 1:N2, i = 1:N1; $body_kernel; end)
-                tail_part = :(for k = $tail_range, j = 1:N2, i = 1:N1; $tail_kernel; end)
-                quote
-                    $head_part; $body_part; $tail_part
-                end
-            end
-        else # N == 4
-            if DIM == 1
-                head_part = :(for i = $head_range; $head_kernel; end)
-                body_part = :(for i = $body_range; $body_kernel; end)
-                tail_part = :(for i = $tail_range; $tail_kernel; end)
-                quote
-                    for l = 1:N4, k = 1:N3, j = 1:N2
-                        $head_part; $body_part; $tail_part
-                    end
-                end
-            elseif DIM == 2
-                head_part = :(for j = $head_range, i = 1:N1; $head_kernel; end)
-                body_part = :(for j = $body_range, i = 1:N1; $body_kernel; end)
-                tail_part = :(for j = $tail_range, i = 1:N1; $tail_kernel; end)
-                quote
-                    for l = 1:N4, k = 1:N3
-                        $head_part; $body_part; $tail_part
-                    end
-                end
-            elseif DIM == 3
-                head_part = :(for k = $head_range, j = 1:N2, i = 1:N1; $head_kernel; end)
-                body_part = :(for k = $body_range, j = 1:N2, i = 1:N1; $body_kernel; end)
-                tail_part = :(for k = $tail_range, j = 1:N2, i = 1:N1; $tail_kernel; end)
-                quote
-                    for l = 1:N4
-                        $head_part; $body_part; $tail_part
-                    end
-                end
-            else # DIM == 4
-                head_part = :(for l = $head_range, k = 1:N3, j = 1:N2, i = 1:N1; $head_kernel; end)
-                body_part = :(for l = $body_range, k = 1:N3, j = 1:N2, i = 1:N1; $body_kernel; end)
-                tail_part = :(for l = $tail_range, k = 1:N3, j = 1:N2, i = 1:N1; $tail_kernel; end)
-                quote
-                    $head_part; $body_part; $tail_part
-                end
-            end
-        end
-
-    # define N1, N2, ...
-    Ni = [Symbol(:N, d) for d in 1:N]
-
-    return quote
-        # check sizes match along the dimension we differentiate along
-        size(x, $DIM) == size(y, $DIM) == size(A.coeffs, 2) ||
-            throw(ArgumentError("inconsistent inputs size"))
-
-        # size of array as a tuple, e.g.
-        # N1, N2, N3 = size(y)
-        $(Expr(:(=), Expr(:tuple, Ni...), :(size(y))))
-
-        @inbounds begin
-            $block
-        end
-
-        return y
-    end
-end
-
-# Find derivative of `x` at point `i` 
-@generated function LinearAlgebra.mul!(A::DiffMatrix{T, WIDTH}, x::AbstractVector, i::Int) where {T, WIDTH}
-    quote
-        # size of vector
-        N = length(x)
-
-        # check size
-        size(A, 2) == N || throw(DimensionMismatch())
-
-        # index of the first element of the stencil
-        left = clamp(i - $WIDTH>>1, 1, N - $WIDTH + 1)
-
-        # expand expressions
-        val = A.coeffs[1, i]*x[left]
-        Base.Cartesian.@nexprs $(WIDTH-1) p -> begin
-            val += A.coeffs[1 + p, i]*x[left + p]
-        end
-        
-        return val
-    end
+    return y
 end
 
 
 # TODO: implement and test new method for channel flow
 # TODO: benchmark resulting change
-# TODO: combine into single function
+# TODO: extend to arbitrary dimensions?
 @generated function LinearAlgebra.mul!(y::AbstractArray{T, N},
                                        A::DiffMatrix{T, WIDTH},
                                        x::AbstractArray{T, N},
@@ -362,10 +213,24 @@ _my_body_mul!(WIDTH, OFFSET, RNG, DIM, N) = _make_loop_expr(:($RNG), DIM, N, _ma
 _my_tail_mul!(WIDTH, LENGTH, OFFSET, DIM, N) = _make_loop_expr(:($(LENGTH - (WIDTH >> 1) + 1):$LENGTH), DIM, N, _make_kernel(DIM, :($(LENGTH - WIDTH + 1)), WIDTH, N, OFFSET))
 
 
-function _make_loop_expr(rows, DIM, N, block)
-    # create loop head
-    Nd_loop_expr = [Expr(:(=), __VARS__[d], d==DIM ? rows : Expr(:call, :(:), 1, Symbol(:N, d))) for d in N:-1:1]
+# Find derivative of `x` at point `i` 
+@generated function LinearAlgebra.mul!(A::DiffMatrix{T, WIDTH}, x::AbstractVector, i::Int) where {T, WIDTH}
+    quote
+        # size of vector
+        N = length(x)
 
-    # define and return full loop expressions
-    return Expr(:for, Expr(:block, Nd_loop_expr...), block)
+        # check size
+        size(A, 2) == N || throw(DimensionMismatch())
+
+        # index of the first element of the stencil
+        left = clamp(i - $WIDTH>>1, 1, N - $WIDTH + 1)
+
+        # expand expressions
+        val = A.coeffs[1, i]*x[left]
+        Base.Cartesian.@nexprs $(WIDTH-1) p -> begin
+            val += A.coeffs[1 + p, i]*x[left + p]
+        end
+        
+        return val
+    end
 end

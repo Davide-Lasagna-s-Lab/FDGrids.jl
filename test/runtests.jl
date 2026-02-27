@@ -126,7 +126,7 @@ end
     for width = (3, 5, 7)
         D = DiffMatrix(gridpoints(50, -1, 1), width, 1)
         Df = FDGrids.full(D)
-        
+
         u = rand(50)
         @test norm(Df * u .- D * u)/50 < 1e-14
 
