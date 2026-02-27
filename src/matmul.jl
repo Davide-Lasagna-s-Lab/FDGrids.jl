@@ -301,38 +301,41 @@ end
 
 # TODO: implement and test new method for channel flow
 # TODO: benchmark resulting change
+# TODO: combine into single function
 @generated function LinearAlgebra.mul!(y::AbstractArray{T, N},
                                        A::DiffMatrix{T, WIDTH},
                                        x::AbstractArray{T, N},
-                                        ::Val{RANK},
-                                        ::Val{NP},
+                                        ::Val{CASE},
+                                        ::Val{OFFSET},
                                         ::Val{RNG},
                                         ::Val{LENGTH},
-                                        ::Val{DIM}=Val(1)) where {T, N, WIDTH, DIM, RANK, NP, RNG, LENGTH}
+                                        ::Val{DIM}=Val(1)) where {T, N, WIDTH, CASE, OFFSET, RNG, LENGTH, DIM}
     # safety checks
-    N   in 1:4     || throw(ArgumentError("invalid array dimension"))
-    DIM in 1:N     || throw(ArgumentError("inconsistent differentiation dimension"))
-    0 <= RANK < NP || throw(ArgumentError("rank argument not valid"))
+    N   in 1:4                         || throw(ArgumentError("invalid array dimension"))
+    DIM in 1:N                         || throw(ArgumentError("inconsistent differentiation dimension"))
+    (RNG[1] > 0 && RNG[end] <= LENGTH) || throw(ArgumentError("invalid range"))
 
     # get correct expression for given region
     block =
-        if RANK == 0
-            head_kernel = RNG[1] <= WIDTH>>1 ? _my_head_mul!(WIDTH, DIM, N) : :()
-            body_kernel = _my_body_mul!(WIDTH, 0, intersect(RNG, (WIDTH >> 1) + 1:RNG[end]), DIM, N)
+        if CASE == :hb
+            head_kernel = _my_head_mul!(WIDTH, DIM, N)
+            body_kernel = _my_body_mul!(WIDTH, 0, (WIDTH >> 1) + 1:RNG[end], DIM, N)
             quote
                 $head_kernel; $body_kernel
             end
-        elseif RANK == NP - 1
-            body_kernel = _my_body_mul!(WIDTH, RANK*LENGTH, intersect(RNG, RNG[1]:(LENGTH - (WIDTH >> 1))), DIM, N)
-            tail_kernel = RNG[end] > LENGTH-WIDTH>>1 ? _my_tail_mul!(WIDTH, LENGTH, RANK*LENGTH, DIM, N) : :()
+        elseif CASE == :b
+            body_kernel = _my_body_mul!(WIDTH, OFFSET, RNG, DIM, N)
+            quote
+                $body_kernel
+            end
+        elseif CASE == :bt
+            body_kernel = _my_body_mul!(WIDTH, OFFSET, RNG[1]:(LENGTH - (WIDTH >> 1)), DIM, N)
+            tail_kernel = _my_tail_mul!(WIDTH, LENGTH, OFFSET, DIM, N)
             quote
                 $body_kernel; $tail_kernel
             end
         else
-            body_kernel = _my_body_mul!(WIDTH, RANK*LENGTH, RNG, DIM, N)
-            quote
-                $body_kernel
-            end
+            throw(ArgumentError("invalid case argument"))
         end
 
     # define N1, N2, N3, N4
@@ -354,6 +357,7 @@ end
     return output
 end
 
+# TODO: replace body of these functions with _make_kernel?
 function _my_head_mul!(WIDTH, DIM, N)
     block = quote
         s = A.coeffs[1, $(__VARS__[DIM])] * $(_make_ref(:x, :(1), DIM, N))
@@ -378,11 +382,11 @@ function _my_body_mul!(WIDTH, OFFSET, RNG, DIM, N)
 end
 
 function _my_tail_mul!(WIDTH, LENGTH, OFFSET, DIM, N)
+    left = LENGTH - WIDTH + 1
     block = quote
-        left = $(__VARS__[DIM]) - $(WIDTH) + 1
-        s = A.coeffs[1, $OFFSET + $(__VARS__[DIM])] * $(_make_ref(:x, :(left), DIM, N))
+        s = A.coeffs[1, $OFFSET + $(__VARS__[DIM])] * $(_make_ref(:x, :($left), DIM, N))
         Base.Cartesian.@nexprs $(WIDTH-1) p -> begin
-            s += A.coeffs[1 + p, $OFFSET + $(__VARS__[DIM])] * $(_make_ref(:x, :(left + p), DIM, N))
+            s += A.coeffs[1 + p, $OFFSET + $(__VARS__[DIM])] * $(_make_ref(:x, :($left + p), DIM, N))
         end
         $(_make_ref(:y, __VARS__[DIM], DIM, N)) = s
     end
