@@ -80,6 +80,51 @@ function _make_kernel(DIM, base, WIDTH, N, OFFSET)
 end
 
 """
+    _make_loop_expr(rows, DIM, N, block) -> Expr
+
+Construct an `Expr` representing a nested `for` loop of depth `N`.
+
+The generated expression has the structure
+
+    for i₁ = r₁
+        for i₂ = r₂
+            ⋮
+                for iₙ = rₙ
+                    block
+                end
+            ⋮
+        end
+    end
+
+where the iteration ranges `r_d` are defined as follows:
+
+- For `d == DIM`, the loop range is `rows`.
+- For all other dimensions `d ≠ DIM`, the loop range is `1:N_d`,
+  where `N_d` is represented symbolically as `Symbol(:N, d)`.
+
+The loop indices are taken from `__VARS__`, and the loops are generated
+in descending order (`N:-1:1`) to maximise cache-locality in line with
+column-major ordering of array data. The function supports loop depths
+up to and including `N = 4`.
+
+# Arguments
+- `rows`: An expression specifying the iteration range for dimension `DIM`.
+- `DIM`: The dimension index whose loop iterates over `rows`.
+- `N`: The total number of nested loops to generate.
+- `block`: The expression forming the body of the innermost loop.
+
+# Returns
+- `Expr`: A Julia expression representing the constructed nested loop.
+"""
+function _make_loop_expr(rows, DIM, N, block)
+    # create loop head
+    Nd_loop_expr = [Expr(:(=), __VARS__[d], d==DIM ? rows : Expr(:call, :(:), 1, Symbol(:N, d))) for d in N:-1:1]
+
+    # define and return full loop expressions
+    return Expr(:for, Expr(:block, Nd_loop_expr...), block)
+end
+
+"""
     LinearAlgebra.mul!(y, A::DiffMatrix, x, ::Val{DIM}=Val(1)) -> y
 
 Apply a finite-difference differentiation operator stored in `A::DiffMatrix` to an
@@ -149,18 +194,14 @@ function LinearAlgebra.mul!(y::AbstractArray{S, N},
     return y
 end
 
-
-# TODO: implement and test new method for channel flow
-# TODO: benchmark resulting change
-# TODO: extend to arbitrary dimensions?
 @generated function LinearAlgebra.mul!(y::AbstractArray{T, N},
-                                       A::DiffMatrix{T, WIDTH},
+                                       A::DiffMatrix{TD, WIDTH},
                                        x::AbstractArray{T, N},
                                         ::Val{CASE},
                                         ::Val{OFFSET},
                                         ::Val{RNG},
                                         ::Val{LENGTH},
-                                        ::Val{DIM}=Val(1)) where {T, N, WIDTH, CASE, OFFSET, RNG, LENGTH, DIM}
+                                        ::Val{DIM}=Val(1)) where {T, TD, N, WIDTH, CASE, OFFSET, RNG, LENGTH, DIM}
     # safety checks
     N   in 1:4                         || throw(ArgumentError("invalid array dimension"))
     DIM in 1:N                         || throw(ArgumentError("inconsistent differentiation dimension"))
