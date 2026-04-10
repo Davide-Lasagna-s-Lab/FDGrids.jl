@@ -69,11 +69,11 @@ The summation is unrolled at generation time using `Base.Cartesian.@nexprs`.
 Typical usage is to build three kernels for head/body/tail regions, with different
 `base` expressions, and splice them into the appropriate loop nests.
 """
-function _make_kernel(DIM, base, WIDTH, N, OFFSET)
+function _make_kernel(DIM, base, WIDTH, N)
     return quote
-        s = A.coeffs[1, $OFFSET + $(__VARS__[DIM])] * $(_make_ref(:x, base, DIM, N))
+        s = A.coeffs[1, offset + $(__VARS__[DIM])] * $(_make_ref(:x, base, DIM, N))
         Base.Cartesian.@nexprs $(WIDTH-1) p -> begin
-            s += A.coeffs[1 + p, $OFFSET + $(__VARS__[DIM])] * $(_make_ref(:x, :( ($base) + p), DIM, N))
+            s += A.coeffs[1 + p, offset + $(__VARS__[DIM])] * $(_make_ref(:x, :( ($base) + p), DIM, N))
         end
         $(_make_ref(:y, __VARS__[DIM], DIM, N)) = s
     end
@@ -187,9 +187,9 @@ function LinearAlgebra.mul!(y::AbstractArray{S, N},
     size(x, DIM) == size(y, DIM) == size(A.coeffs, 2) || throw(ArgumentError("inconsistent inputs size"))
 
     # perform multiplication
-    LinearAlgebra.mul!(y, A, x, Val(:hb), Val(0), Val(                        1:(WIDTH>>1)               ), Val(size(x, DIM)), Val(DIM))
-    LinearAlgebra.mul!(y, A, x, Val(:b ), Val(0), Val(           ((WIDTH>>1)+1):(size(x, DIM)-(WIDTH>>1))), Val(size(x, DIM)), Val(DIM))
-    LinearAlgebra.mul!(y, A, x, Val(:bt), Val(0), Val((size(x, DIM)-(WIDTH>>1)):size(x, DIM)             ), Val(size(x, DIM)), Val(DIM))
+    # LinearAlgebra.mul!(y, A, x, Val(:hb), Val(0), Val(                        1:(WIDTH>>1)               ), Val(size(x, DIM)), Val(DIM))
+    LinearAlgebra.mul!(y, A, x, Val(:b ), 0, Val(           ((WIDTH>>1)+1):(size(x, DIM)-(WIDTH>>1))), Val(size(x, DIM)), Val(DIM))
+    # LinearAlgebra.mul!(y, A, x, Val(:bt), Val(0), Val((size(x, DIM)-(WIDTH>>1)):size(x, DIM)             ), Val(size(x, DIM)), Val(DIM))
 
     return y
 end
@@ -198,7 +198,7 @@ end
                                        A::DiffMatrix{TD, WIDTH},
                                        x::AbstractArray{T, N},
                                         ::Val{CASE},
-                                        ::Val{OFFSET},
+                                  offset::Int,
                                         ::Val{RNG},
                                         ::Val{LENGTH},
                                         ::Val{DIM}=Val(1)) where {T, TD, N, WIDTH, CASE, OFFSET, RNG, LENGTH, DIM}
@@ -216,13 +216,13 @@ end
                 $head_kernel; $body_kernel
             end
         elseif CASE == :b
-            body_kernel = _my_body_mul!(WIDTH, OFFSET, RNG, DIM, N)
+            body_kernel = _my_body_mul!(WIDTH, RNG, DIM, N)
             quote
                 $body_kernel
             end
         elseif CASE == :bt
-            body_kernel = _my_body_mul!(WIDTH, OFFSET, RNG[1]:(LENGTH - (WIDTH >> 1)), DIM, N)
-            tail_kernel = _my_tail_mul!(WIDTH, LENGTH, OFFSET, DIM, N)
+            body_kernel = _my_body_mul!(WIDTH, RNG[1]:(LENGTH - (WIDTH >> 1)), DIM, N)
+            tail_kernel = _my_tail_mul!(WIDTH, LENGTH, DIM, N)
             quote
                 $body_kernel; $tail_kernel
             end
@@ -250,8 +250,8 @@ end
 end
 
 _my_head_mul!(WIDTH, DIM, N) = _make_loop_expr(:(1:$(WIDTH >> 1)), DIM, N, _make_kernel(DIM, :(1), WIDTH, N, 0))
-_my_body_mul!(WIDTH, OFFSET, RNG, DIM, N) = _make_loop_expr(:($RNG), DIM, N, _make_kernel(DIM, :($(__VARS__[DIM]) - $(WIDTH >> 1)), WIDTH, N, OFFSET))
-_my_tail_mul!(WIDTH, LENGTH, OFFSET, DIM, N) = _make_loop_expr(:($(LENGTH - (WIDTH >> 1) + 1):$LENGTH), DIM, N, _make_kernel(DIM, :($(LENGTH - WIDTH + 1)), WIDTH, N, OFFSET))
+_my_body_mul!(WIDTH, RNG, DIM, N) = _make_loop_expr(:($RNG), DIM, N, _make_kernel(DIM, :($(__VARS__[DIM]) - $(WIDTH >> 1)), WIDTH, N))
+_my_tail_mul!(WIDTH, LENGTH, DIM, N) = _make_loop_expr(:($(LENGTH - (WIDTH >> 1) + 1):$LENGTH), DIM, N, _make_kernel(DIM, :($(LENGTH - WIDTH + 1)), WIDTH, N))
 
 
 # Find derivative of `x` at point `i` 
