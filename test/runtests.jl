@@ -418,9 +418,9 @@ end
             # helper: index for center/boundary along the differentiated axis,
             # keeping the other indices fixed to 1
             idx_on_axis(DIM, pos) = DIM == 1 ? CartesianIndex(pos, 1, 1, 1) :
-                                  DIM == 2 ? CartesianIndex(1, pos, 1, 1) :
-                                  DIM == 3 ? CartesianIndex(1, 1, pos, 1) :
-                                             CartesianIndex(1, 1, 1, pos)
+                                    DIM == 2 ? CartesianIndex(1, pos, 1, 1) :
+                                    DIM == 3 ? CartesianIndex(1, 1, pos, 1) :
+                                               CartesianIndex(1, 1, 1, pos)
 
             for DIM in 1:4
                 fs_view    = view_for_dim(fs, DIM)
@@ -453,41 +453,40 @@ end
     end
 end
 
-struct DummyVector{N, SHAPE, DIM, NHALO} <: AbstractArray{Float64, N}
-    data::Array{Float64, N}
-    DummyVector(shape::NTuple{N, Int}, dim::Int, nhalo::Int) where {N} =
-        new{N, shape, dim, nhalo}(zeros(Float64, ntuple(d->d==dim ? shape[d]+2*nhalo : shape[d], N)))
-end
-Base.IndexStyle(::DummyVector) = IndexLinear()
-Base.size(::DummyVector{N, SHAPE}) where {N, SHAPE} = SHAPE
-Base.getindex(v::DummyVector{N, SHAPE, DIM, NHALO}, I::Vararg{Int, N}) where {N, SHAPE, DIM, NHALO} =
-    v.data[ntuple(d->d==DIM ? I[d]+NHALO : I[d], N)...]
-Base.setindex!(v::DummyVector{N, SHAPE, DIM, NHALO}, val, I::Vararg{Int, N}) where {N, SHAPE, DIM, NHALO} =
-    (v.data[ntuple(d->d==DIM ? I[d]+NHALO : I[d], 4)...] = val; return val)
-
 @testset "test distributed matmul                   " begin
-    tmp = gridpoints(64, -1, 1, 0.5)
-    xs = zeros(eltype(tmp), 2, 2, 64)
-    [xs[i, j, :] .= tmp for i in 1:2, j in 1:2]
-    out_EX = -2.0.*xs
-    D = DiffMatrix(xs[1, 1, :], 5, 1)
-    out_FD = zero(xs)
-    input = DummyVector((2, 2, 16), 3, 2)
-    input.data[:, :, 3:20] .= 1 .- xs[:, :, 1:18].^2
-    mul!(@view(out_FD[:, :,  1:16]), D, input, Val(:hb), Val(0 ), Val( 1:14), Val(size(input, 3)), Val(3))
-    mul!(@view(out_FD[:, :,  1:16]), D, input, Val(:b ), Val(0 ), Val(15:16), Val(size(input, 3)), Val(3))
-    input.data[:, :, 1:20] .= 1 .- xs[:, :, 15:34].^2
-    mul!(@view(out_FD[:, :, 17:32]), D, input, Val(:b ), Val(16), Val( 1:2 ), Val(size(input, 3)), Val(3))
-    mul!(@view(out_FD[:, :, 17:32]), D, input, Val(:b ), Val(16), Val( 3:14), Val(size(input, 3)), Val(3))
-    mul!(@view(out_FD[:, :, 17:32]), D, input, Val(:b ), Val(16), Val(15:16), Val(size(input, 3)), Val(3))
-    input.data[:, :, 1:20] .= 1 .- xs[:, :, 31:50].^2
-    mul!(@view(out_FD[:, :, 33:48]), D, input, Val(:b ), Val(32), Val( 1:2 ), Val(size(input, 3)), Val(3))
-    mul!(@view(out_FD[:, :, 33:48]), D, input, Val(:b ), Val(32), Val( 3:14), Val(size(input, 3)), Val(3))
-    mul!(@view(out_FD[:, :, 33:48]), D, input, Val(:b ), Val(32), Val(15:16), Val(size(input, 3)), Val(3))
-    input.data[:, :, 1:18] .= 1 .- xs[:, :, 47:64].^2
-    mul!(@view(out_FD[:, :, 49:64]), D, input, Val(:b ), Val(48), Val( 1:2 ), Val(size(input, 3)), Val(3))
-    mul!(@view(out_FD[:, :, 49:64]), D, input, Val(:bt), Val(48), Val( 3:16), Val(size(input, 3)), Val(3))
-    @test out_FD ≈ out_EX
+
+    M = 32
+    OTHER = 2
+    NCHUNKS = 4
+
+    xs = gridpoints(M, -1, 1, 0.5)
+
+    @testset "N=$N DIM=$DIM width=$width" for N in 1:4, DIM in 1:N, width in (3, 5, 7)
+        shape = ntuple(d -> d == DIM ? M : OTHER, N)
+        D = DiffMatrix(xs, width, 1)
+
+        x = zeros(shape...)
+        for I in CartesianIndices(x)
+            x[I] = 1.0 - xs[I[DIM]]^2
+        end
+
+        # reference: full non-distributed multiply
+        y_ref = similar(x)
+        mul!(y_ref, D, x, Val(DIM))
+
+        # split local_rng into NCHUNKS sub-ranges, each call writes only
+        # its slice of y_dist via local_rng; x is always passed in full
+        chunk_size = M ÷ NCHUNKS
+        y_dist = similar(x)
+
+        for k in 1:NCHUNKS
+            g_start = (k - 1) * chunk_size + 1
+            g_end = k == NCHUNKS ? M : k * chunk_size
+            mul!(y_dist, D, x, Val(DIM), 1, g_start:g_end)
+        end
+
+        @test y_dist ≈ y_ref
+    end
 end
 
 @testset "test lufact                               " begin
