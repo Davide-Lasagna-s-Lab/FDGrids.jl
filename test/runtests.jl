@@ -454,14 +454,14 @@ end
 end
 
 @testset "test distributed matmul                   " begin
-
     M = 32
     OTHER = 2
     NCHUNKS = 4
-
     xs = gridpoints(M, -1, 1, 0.5)
 
     @testset "N=$N DIM=$DIM width=$width" for N in 1:4, DIM in 1:N, width in (3, 5, 7)
+        HWIDTH = width >> 1
+        chunk_size = M ÷ NCHUNKS
         shape = ntuple(d -> d == DIM ? M : OTHER, N)
         D = DiffMatrix(xs, width, 1)
 
@@ -474,15 +474,19 @@ end
         y_ref = similar(x)
         mul!(y_ref, D, x, Val(DIM))
 
-        # split local_rng into NCHUNKS sub-ranges, each call writes only
-        # its slice of y_dist via local_rng; x is always passed in full
-        chunk_size = M ÷ NCHUNKS
-        y_dist = similar(x)
+        # each chunk gets a view of x and y of size chunk_size along DIM;
+        # global_idx shifts A.coeffs column selection to the correct global rows.
+        # boundary points within interior chunks (first/last HWIDTH indices)
+        # are not computed — initialise from reference so the final comparison
+        # covers only what each chunk actually wrote.
+        y_dist = copy(y_ref)
 
         for k in 1:NCHUNKS
             g_start = (k - 1) * chunk_size + 1
             g_end = k == NCHUNKS ? M : k * chunk_size
-            mul!(y_dist, D, x, Val(DIM), 1, g_start:g_end)
+            x_view = selectdim(x, DIM, g_start:g_end)
+            y_view = selectdim(y_dist, DIM, g_start:g_end)
+            mul!(y_view, D, x_view, Val(DIM), g_start, 1:chunk_size)
         end
 
         @test y_dist ≈ y_ref
