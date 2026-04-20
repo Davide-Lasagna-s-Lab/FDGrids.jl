@@ -1,260 +1,361 @@
-# complete set of loop variables and array dimensions (up to array of dimension 4)
-const __VARS__ = (:i, :j, :k, :l)
-const __NS__ = (:N1, :N2, :N3, :N4)
+# ----------------
+# HELPER FUNCTIONS
+# ----------------
 
 """
     _make_ref(array, expr, DIM, N) -> Expr
 
-Construct an indexing AST (`Expr(:ref, ...)`) for an `N`-dimensional array symbol,
-using the loop-variable symbols stored in `__VARS__`.
+Construct an array-indexing expression for use in generated code.
 
-The returned expression has the form
+The returned AST has the form
 
-- `array[i, j, k, ...]` in `N` dimensions,
+    array[i1, i2, ..., iN]
 
-except that the index in position `DIM` is replaced by the expression `expr`.
-
-This is intended for code generation inside `@generated` methods.
+where each index is the loop variable `Symbol(:i, d)`, except along dimension
+`DIM`, whose index is replaced by `expr`. This is a small utility used when
+building the generated stencil kernels.
 
 # Arguments
-- `array`: Symbol or expression representing the array being indexed (typically `:x` or `:y`).
-- `expr`: Expression to be placed in slot `DIM` (e.g. `1`, `:base`, `:(base + p)`).
-- `DIM`: Integer axis (1-based) whose index is replaced by `expr`.
+- `array`: Symbol naming the array to index, such as `:x` or `:y`.
+- `expr`: Expression to place in the `DIM`-th index position.
+- `DIM`: Target dimension, using 1-based indexing.
 - `N`: Total number of array dimensions.
 
-# Requirements / Assumptions
-- `1 ≤ DIM ≤ N`.
+# Returns
+- An `Expr(:ref, ...)` representing the indexed array access.
 
 # Examples
-- `_make_ref(:x, 1, 2, 4)` generates `x[i, 1, k, l]`.
-- `_make_ref(:x, :(base + p), 3, 4)` generates `x[i, j, base + p, l]`.
+- `_make_ref(:x, :1, 2, 4)` produces `:(x[i1, 1, i3, i4])`
+- `_make_ref(:x, :(base + p), 3, 4)` produces `:(x[i1, i2, base + p, i4])`
+
+# Notes
+This function does not validate `DIM` or `N`; callers are expected to pass
+consistent values.
 """
 function _make_ref(array, expr, DIM, N)
-    inds = ntuple(d -> d == DIM ? expr : __VARS__[d], N)
+    inds = ntuple(d -> d == DIM ? expr : Symbol(:i, d), N)
     return Expr(:ref, array, inds...)
 end
 
+
 """
-    _make_kernel(DIM, base, WIDTH, N) -> Expr
+    _make_kernel_expr(DIM, WIDTH, N, base) -> Expr
 
-Build an AST (`quote ... end`) for applying a width-`WIDTH` finite-difference stencil
-along axis `DIM` at the current grid location defined by the loop variables in `__VARS__`.
+Build the expression for one stencil evaluation at a single grid point.
 
-The generated code computes
+The generated code computes the finite-difference sum along dimension `DIM`
+using a stencil of width `WIDTH`, with `base` giving the first index of the
+local stencil window. The result is written to `y` at the current loop indices.
 
-- `s = Σ_{p=0}^{WIDTH-1} A.coeffs[1+p, q] * x[ ... , base + p, ... ]`
+Conceptually, the emitted code evaluates
 
-where `q = __VARS__[DIM]` is the loop variable for the differentiated axis, and the
-stencil varies only in slot `DIM`. The result is written to the corresponding element
-of `y` at the current indices.
+    y[...] = sum(A.coeffs[1+p, global_idx-1+iDIM] * x[..., base+p, ...] for p = 0:WIDTH-1)
 
-The summation is unrolled at generation time using `Base.Cartesian.@nexprs`.
+where `iDIM = Symbol(:i, DIM)` is the loop variable along the differentiated
+dimension. The summation is unrolled at code-generation time.
 
 # Arguments
-- `DIM`: Integer axis (1-based) the stencil is applied along.
-- `base`: Expression for the first index of the stencil window placed in slot `DIM`
-  (e.g. `1`, `:(q - hW)`, `:(Nq - WIDTH + 1)`).
-- `WIDTH`: Stencil width (compile-time constant for unrolling).
-- `N`: Total number of array dimensions.
-
-# Requirements / Assumptions
-- `A`, `x`, `y`, and `__VARS__` are in scope in the final emitted code.
-
-# Notes
-- `base` is treated as an AST; the term `(base) + p` is emitted as code,
-  and `p` is substituted by `@nexprs` during macro expansion/unrolling.
-- The assignment target is generated via `_make_ref` so the code works for any `N`.
-
-# Examples
-Typical usage is to build three kernels for head/body/tail regions, with different
-`base` expressions, and splice them into the appropriate loop nests.
-"""
-function _make_kernel(DIM, base, WIDTH, N)
-    return quote
-        s = A.coeffs[1, offset + $(__VARS__[DIM])] * $(_make_ref(:x, base, DIM, N))
-        Base.Cartesian.@nexprs $(WIDTH-1) p -> begin
-            s += A.coeffs[1 + p, offset + $(__VARS__[DIM])] * $(_make_ref(:x, :( ($base) + p), DIM, N))
-        end
-        $(_make_ref(:y, __VARS__[DIM], DIM, N)) = s
-    end
-end
-
-"""
-    _make_loop_expr(rows, DIM, N, block) -> Expr
-
-Construct an `Expr` representing a nested `for` loop of depth `N`.
-
-The generated expression has the structure
-
-    for i₁ = r₁
-        for i₂ = r₂
-            ⋮
-                for iₙ = rₙ
-                    block
-                end
-            ⋮
-        end
-    end
-
-where the iteration ranges `r_d` are defined as follows:
-
-- For `d == DIM`, the loop range is `rows`.
-- For all other dimensions `d ≠ DIM`, the loop range is `1:N_d`,
-  where `N_d` is represented symbolically as `Symbol(:N, d)`.
-
-The loop indices are taken from `__VARS__`, and the loops are generated
-in descending order (`N:-1:1`) to maximise cache-locality in line with
-column-major ordering of array data. The function supports loop depths
-up to and including `N = 4`.
-
-# Arguments
-- `rows`: An expression specifying the iteration range for dimension `DIM`.
-- `DIM`: The dimension index whose loop iterates over `rows`.
-- `N`: The total number of nested loops to generate.
-- `block`: The expression forming the body of the innermost loop.
+- `DIM`: Differentiation dimension.
+- `WIDTH`: Number of stencil points.
+- `N`: Total number of dimensions of `x` and `y`.
+- `base`: Expression giving the first index of the stencil window along `DIM`.
 
 # Returns
-- `Expr`: A Julia expression representing the constructed nested loop.
-"""
-function _make_loop_expr(rows, DIM, N, block)
-    # create loop head
-    Nd_loop_expr = [Expr(:(=), __VARS__[d], d==DIM ? rows : Expr(:call, :(:), 1, Symbol(:N, d))) for d in N:-1:1]
+- An expression that computes the stencil value and stores it into `y`.
 
-    # define and return full loop expressions
-    return Expr(:for, Expr(:block, Nd_loop_expr...), block)
+# Expected runtime bindings
+The generated expression assumes the following names are available in scope:
+- `A`: Differentiation operator.
+- `x`: Input array.
+- `y`: Output array.
+- `global_idx`: Global row offset into `A.coeffs`.
+
+# Typical values of `base`
+- `:1` for the head region
+- `:(iDIM - HWIDTH)` for the interior region
+- `:(size(x, DIM) - WIDTH + 1)` for the tail region
+
+# Notes
+`global_idx` is `1` in the non-distributed case and larger when the operator is
+applied to a local slice of a globally indexed dimension.
+"""
+function _make_kernel_expr(DIM, WIDTH, N, base)
+    index = Symbol(:i, DIM)
+    return quote
+        s = A.coeffs[1, global_idx-1+$index] * $(_make_ref(:x, base, DIM, N))
+        Base.Cartesian.@nexprs $(WIDTH - 1) p -> begin
+            s += A.coeffs[1+p, global_idx-1+$index] * $(_make_ref(:x, :(($base) + p), DIM, N))
+        end
+        $(_make_ref(:y, index, DIM, N)) = s
+    end
 end
+
+
+"""
+    _make_loop_expr(DIM, N, WIDTH) -> Expr
+
+Construct the full nested loop expression that applies a finite-difference
+stencil along dimension `DIM`.
+
+The generated code splits the differentiated axis into three regions:
+
+- **head**: points near the left boundary, where the stencil is pinned to the
+  start of the domain
+- **body**: interior points, where the stencil is centred
+- **tail**: points near the right boundary, where the stencil is pinned to the
+  end of the domain
+
+Separate kernels are generated for these three cases so that the stencil
+accumulation itself contains no runtime branching.
+
+# Arguments
+- `DIM`: Differentiation dimension.
+- `N`: Number of array dimensions.
+- `WIDTH`: Stencil width. This is expected to be odd.
+
+# Returns
+- An expression containing the runtime preamble and the complete loop nest.
+
+# Structure of the generated code
+1. A preamble computes `head_range`, `body_range`, `tail_range`, and the flags
+   `has_head` and `has_tail`.
+2. The stencil kernels for head, body, and tail are generated separately.
+3. These kernels are wrapped in loops over all dimensions so that iteration
+   follows Julia's column-major layout, with dimension 1 innermost.
+
+# Expected runtime bindings
+The emitted code expects the following variables to be defined:
+- `A`, `x`, `y`
+- `global_idx::Int`
+- `local_rng::UnitRange`
+- `N1, N2, ..., NN`, holding the sizes of `y`
+
+# Distributed behaviour
+Boundary kernels are only executed when `global_idx` and `local_rng` indicate
+that the current process owns the corresponding boundary rows of `A`. Interior
+subdomains therefore execute only the body kernel.
+
+# Notes
+This function only builds the loop AST; it does not execute anything itself.
+"""
+function _make_loop_expr(DIM, N, WIDTH)
+    index = Symbol(:i, DIM)
+    HWIDTH = WIDTH >> 1
+
+    # ---- preamble: compute ranges and boundary flags at runtime ----
+    # These are all loop-invariant; LLVM will hoist the has_head/has_tail
+    # checks outside the generated loop automatically.
+    preamble = quote
+        # index ranges for each region along dimension DIM, clamped to local_rng
+        head_range = max(1, local_rng[1]):min($HWIDTH, local_rng[end])
+        body_range = max($HWIDTH + 1, local_rng[1]):min(size(x, $DIM) - $HWIDTH, local_rng[end])
+        tail_range = max(size(x, $DIM) - $HWIDTH + 1, local_rng[1]):min(size(x, $DIM), local_rng[end])
+
+        # this process owns the left boundary rows of A
+        has_head = global_idx == 1 && local_rng[1] ≤ $HWIDTH
+        # this process owns the right boundary rows of A
+        has_tail = global_idx + local_rng[end] - 1 > size(A, 1) - $HWIDTH
+    end
+
+    # ---- kernels: one per region, base expression pinned at generation time ----
+    head_kernel = _make_kernel_expr(DIM, WIDTH, N, :1)
+    body_kernel = _make_kernel_expr(DIM, WIDTH, N, :($index - $HWIDTH))
+    tail_kernel = _make_kernel_expr(DIM, WIDTH, N, :(size(x, $DIM) - $WIDTH + 1))
+
+    # ---- phase 1: wrap kernels in inner loops for d < DIM ----
+    # Iterating 1:DIM-1 means d=1 is wrapped first and ends up innermost,
+    # keeping i1 as the fastest-running index (column-major order).
+    inner_head = head_kernel
+    inner_body = body_kernel
+    inner_tail = tail_kernel
+    for d in 1:DIM-1
+        rng = :(1:$(Symbol(:N, d)))
+        inner_head = Expr(:for, Expr(:(=), Symbol(:i, d), rng), inner_head)
+        inner_body = Expr(:for, Expr(:(=), Symbol(:i, d), rng), inner_body)
+        inner_tail = Expr(:for, Expr(:(=), Symbol(:i, d), rng), inner_tail)
+    end
+
+    # ---- phase 2: stencil dimension block ----
+    # head and tail are guarded by loop-invariant flags; body always runs.
+    dim_block = quote
+        if has_head
+            for $index in head_range
+                $inner_head
+            end
+        end
+        for $index in body_range
+            $inner_body
+        end
+        if has_tail
+            for $index in tail_range
+                $inner_tail
+            end
+        end
+    end
+
+    # ---- phase 3: wrap in outer loops for d > DIM ----
+    loop = dim_block
+    for d in DIM+1:N
+        rng = :(1:$(Symbol(:N, d)))
+        loop = Expr(:for, Expr(:(=), Symbol(:i, d), rng), loop)
+    end
+
+    return quote
+        $preamble
+        $loop
+    end
+end
+
+
+# ----------------
+# PUBLIC INTERFACE
+# ----------------
 
 """
     LinearAlgebra.mul!(y, A::DiffMatrix, x, ::Val{DIM}=Val(1)) -> y
 
-Apply a finite-difference differentiation operator stored in `A::DiffMatrix` to an
-`N`-dimensional array `x` and write the result into `y`, differentiating along
-dimension `DIM`.
+Apply the finite-difference operator `A` to `x` along dimension `DIM`, writing
+the result into `y`.
 
-This method is implemented as a `@generated` function and supports `N ∈ 1:4`.
-`DIM` is a compile-time constant (`Val{DIM}`), so the generated code:
-
-- specializes the loop nest for the chosen `(N, DIM)` pair,
-- keeps the first array index (`i`) as the fastest-running loop index wherever possible,
-- splits the differentiated axis into three regions (head/body/tail) to handle
-  boundary stencils without branching in the inner loop,
-- unrolls the stencil accumulation using `Base.Cartesian.@nexprs` with width `WIDTH`.
+This is the standard non-distributed entry point. It applies the operator over
+the full extent of the differentiated dimension by forwarding to the lower-level
+method with `global_idx = 1` and `local_rng = 1:size(x, DIM)`.
 
 # Arguments
-- `y::AbstractArray{S,N}`: output array (updated in-place).
-- `A::DiffMatrix{T,WIDTH}`: differentiation operator. `A.coeffs` is assumed to be
-  `WIDTH × size(x,DIM)`, with column `q` containing the stencil weights for output
-  location `q` along the differentiated axis.
-- `x::AbstractArray{S,N}`: input array.
-- `::Val{DIM}`: compile-time differentiation dimension (default `Val(1)`).
+- `y`: Destination array.
+- `A`: Finite-difference operator.
+- `x`: Source array.
+- `Val(DIM)`: Differentiation dimension, known at compile time. Defaults to `Val(1)`.
 
-# Type Parameters
-- `S`: element type of `x` and `y`.
-- `T`: coefficient type stored in `A`.
-- `N`: array dimensionality (restricted to `1:4`).
-- `WIDTH`: stencil width (compile-time constant for unrolling).
-- `DIM`: differentiation dimension, `1 ≤ DIM ≤ N`.
+# Returns
+- `y`
 
-# Behaviour and Assumptions
-- Checks that `size(x, DIM) == size(y, DIM) == size(A.coeffs, 2)`.
-- Assumes loop index symbols `__VARS__` (e.g. `(:i,:j,:k,:l)`) and size symbols
-  `__NS__` (e.g. `(:N1,:N2,:N3,:N4)`) are available in the generator scope.
-- Uses three stencil starting positions:
-  - head: `base = 1`
-  - body: `base = q - hWIDTH`
-  - tail: `base = Nq - WIDTH + 1`
-  where `q` is the loop variable associated with the differentiated dimension and
-  `hWIDTH = WIDTH ÷ 2`.
+# Requirements
+- `x` and `y` must have the same dimensionality.
+- `size(x, DIM) == size(y, DIM) == size(A.coeffs, 2)`.
 
-# Implementation Notes
-- The emitted code destructures `size(y)` into `N1, N2, ...` using a generated tuple
-  assignment, e.g. `(N1,N2,N3) = size(y)`.
-- Loop structure depends on `(N,DIM)` to avoid restarting the outer loops between
-  head/body/tail segments for `DIM < N`, improving memory locality.
-
-# Examples
-Differentiate a 3D field `x` along the second dimension:
-
-```julia
-mul!(y, A, x, Val(2))
-```
+# Notes
+Only the size of the differentiated dimension is checked here. The generated
+implementation assumes the remaining dimensions of `x` and `y` are compatible.
 """
-function LinearAlgebra.mul!(y::AbstractArray{S, N},
-                            A::DiffMatrix{T, WIDTH},
+function LinearAlgebra.mul!(y::AbstractArray{S, N}, 
+                            A::DiffMatrix{T, WIDTH}, 
                             x::AbstractArray{S, N},
                              ::Val{DIM}=Val(1)) where {T, S, N, WIDTH, DIM}
-    # check sizes match along the dimension we differentiate along
-    size(x, DIM) == size(y, DIM) == size(A.coeffs, 2) || throw(ArgumentError("inconsistent inputs size"))
-
-    # perform multiplication
-    # LinearAlgebra.mul!(y, A, x, Val(:hb), Val(0), Val(                        1:(WIDTH>>1)               ), Val(size(x, DIM)), Val(DIM))
-    LinearAlgebra.mul!(y, A, x, Val(:b ), 0, Val(           ((WIDTH>>1)+1):(size(x, DIM)-(WIDTH>>1))), Val(size(x, DIM)), Val(DIM))
-    # LinearAlgebra.mul!(y, A, x, Val(:bt), Val(0), Val((size(x, DIM)-(WIDTH>>1)):size(x, DIM)             ), Val(size(x, DIM)), Val(DIM))
-
-    return y
+    size(x, DIM) == size(y, DIM) == size(A.coeffs, 2) ||
+        throw(ArgumentError("inconsistent inputs size"))
+    return LinearAlgebra.mul!(y, A, x, Val(DIM), 1, 1:size(x, DIM))
 end
 
+
+"""
+    LinearAlgebra.mul!(y, A::DiffMatrix, x, ::Val{DIM}, global_idx, local_rng) -> y
+
+Apply the finite-difference operator `A` to `x` along dimension `DIM`, writing
+the result into `y`, over a specified local subrange of that dimension.
+
+This method is the distribution-aware backend. It is implemented as a generated
+function so that, for fixed `N`, `WIDTH`, and `DIM`, the loop nest, stencil
+unrolling, and head/body/tail kernels are all specialised at compile time.
+
+# Arguments
+- `y`: Destination array.
+- `A`: Finite-difference operator.
+- `x`: Source array.
+- `Val(DIM)`: Differentiation dimension, known at compile time.
+- `global_idx::Int`: Global index of the first element in `local_rng`, measured
+  in the row numbering used by `A.coeffs`.
+- `local_rng::UnitRange`: Local portion of dimension `DIM` to process.
+
+# Returns
+- `y`
+
+# Runtime checks
+The method verifies that:
+- `DIM` is a valid array dimension
+- `size(x, DIM) == size(y, DIM)`
+- `local_rng` lies within `1:size(x, DIM)`
+- `global_idx + local_rng[end] - 1 ≤ size(A, 1)`
+
+# Implementation details
+- The generated code splits the differentiated axis into head, body, and tail
+  regions.
+- Boundary kernels are emitted only where needed; interior subdomains execute
+  only the centred stencil.
+- The sizes of `y` are unpacked into symbols `N1, N2, ...` so that the loop
+  bounds can be embedded directly in the generated AST.
+- The full loop nest is wrapped in `@inbounds` after the initial sanity checks.
+
+# Notes
+Use the higher-level `mul!(y, A, x, Val(DIM))` method unless you explicitly need
+distributed or blockwise application.
+"""
 @generated function LinearAlgebra.mul!(y::AbstractArray{T, N},
                                        A::DiffMatrix{TD, WIDTH},
                                        x::AbstractArray{T, N},
-                                        ::Val{CASE},
-                                  offset::Int,
-                                        ::Val{RNG},
-                                        ::Val{LENGTH},
-                                        ::Val{DIM}=Val(1)) where {T, TD, N, WIDTH, CASE, OFFSET, RNG, LENGTH, DIM}
+                                        ::Val{DIM},
+                              global_idx::Int,
+                               local_rng::UnitRange) where {T, TD, N, WIDTH, DIM}
     # safety checks
-    N   in 1:4                         || throw(ArgumentError("invalid array dimension"))
-    DIM in 1:N                         || throw(ArgumentError("inconsistent differentiation dimension"))
-    (RNG[1] > 0 && RNG[end] <= LENGTH) || throw(ArgumentError("invalid range"))
+    DIM in 1:N || throw(ArgumentError("inconsistent differentiation dimension"))
 
-    # get correct expression for given region
-    block =
-        if CASE == :hb
-            head_kernel = _my_head_mul!(WIDTH, DIM, N)
-            body_kernel = _my_body_mul!(WIDTH, 0, (WIDTH >> 1) + 1:RNG[end], DIM, N)
-            quote
-                $head_kernel; $body_kernel
-            end
-        elseif CASE == :b
-            body_kernel = _my_body_mul!(WIDTH, RNG, DIM, N)
-            quote
-                $body_kernel
-            end
-        elseif CASE == :bt
-            body_kernel = _my_body_mul!(WIDTH, RNG[1]:(LENGTH - (WIDTH >> 1)), DIM, N)
-            tail_kernel = _my_tail_mul!(WIDTH, LENGTH, DIM, N)
-            quote
-                $body_kernel; $tail_kernel
-            end
-        else
-            throw(ArgumentError("invalid case argument"))
-        end
+    # build the full nested loop expression at compile time
+    block = _make_loop_expr(DIM, N, WIDTH)
 
-    # define N1, N2, N3, N4
+    # symbols for the sizes of each dimension, e.g. N1, N2, N3
     Ni = [Symbol(:N, d) for d in 1:N]
 
-    output = quote
-        # size of array as a tuple, e.g.
-        # N1, N2, N3 = size(y)
+    return quote
+        # runtime sanity checks
+        size(x, $DIM) == size(y, $DIM) ||
+            throw(ArgumentError("inconsistent inputs size"))
+        local_rng[1] > 0 && local_rng[end] ≤ size(x, $DIM) ||
+            throw(ArgumentError("out of bounds local range specification"))
+        global_idx + local_rng[end] - 1 ≤ size(A, 1) ||
+            throw(ArgumentError("out of bounds global/local range specification"))
+
+        # destructure size(y) into N1, N2, ... for use in the generated loops
         $(Expr(:(=), Expr(:tuple, Ni...), :(size(y))))
 
-        # main differentiation loop
         @inbounds begin
             $block
         end
 
         return y
     end
-
-    return output
 end
 
-_my_head_mul!(WIDTH, DIM, N) = _make_loop_expr(:(1:$(WIDTH >> 1)), DIM, N, _make_kernel(DIM, :(1), WIDTH, N, 0))
-_my_body_mul!(WIDTH, RNG, DIM, N) = _make_loop_expr(:($RNG), DIM, N, _make_kernel(DIM, :($(__VARS__[DIM]) - $(WIDTH >> 1)), WIDTH, N))
-_my_tail_mul!(WIDTH, LENGTH, DIM, N) = _make_loop_expr(:($(LENGTH - (WIDTH >> 1) + 1):$LENGTH), DIM, N, _make_kernel(DIM, :($(LENGTH - WIDTH + 1)), WIDTH, N))
 
+"""
+    LinearAlgebra.mul!(A::DiffMatrix{T,WIDTH}, x::AbstractVector, i::Int)
 
-# Find derivative of `x` at point `i` 
+Evaluate row `i` of the finite-difference operator `A` on the vector `x`.
+
+This computes a single stencil application, returning the scalar
+
+    sum(A.coeffs[1+p, i] * x[left+p] for p = 0:WIDTH-1)
+
+where `left` is the clamped starting index of the stencil window centered as
+closely as possible around `i`.
+
+# Arguments
+- `A`: Finite-difference operator.
+- `x`: Input vector.
+- `i`: Target row / evaluation index.
+
+# Returns
+- The scalar value of the operator applied at index `i`.
+
+# Behaviour near boundaries
+The stencil window is shifted as needed so that it remains within the valid
+index range of `x`.
+
+# Requirements
+- `length(x) == size(A, 2)`.
+
+# Notes
+The stencil sum is unrolled at generation time.
+"""
 @generated function LinearAlgebra.mul!(A::DiffMatrix{T, WIDTH}, x::AbstractVector, i::Int) where {T, WIDTH}
     quote
         # size of vector
@@ -264,14 +365,14 @@ _my_tail_mul!(WIDTH, LENGTH, DIM, N) = _make_loop_expr(:($(LENGTH - (WIDTH >> 1)
         size(A, 2) == N || throw(DimensionMismatch())
 
         # index of the first element of the stencil
-        left = clamp(i - $WIDTH>>1, 1, N - $WIDTH + 1)
+        left = clamp(i - $WIDTH >> 1, 1, N - $WIDTH + 1)
 
         # expand expressions
-        val = A.coeffs[1, i]*x[left]
-        Base.Cartesian.@nexprs $(WIDTH-1) p -> begin
-            val += A.coeffs[1 + p, i]*x[left + p]
+        val = A.coeffs[1, i] * x[left]
+        Base.Cartesian.@nexprs $(WIDTH - 1) p -> begin
+            val += A.coeffs[1+p, i] * x[left+p]
         end
-        
+
         return val
     end
 end

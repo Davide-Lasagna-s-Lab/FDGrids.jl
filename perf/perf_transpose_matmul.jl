@@ -24,20 +24,21 @@ using Printf
 WIDTH = 5
 ORDER = 1
 
-sizes = (32, 32, 32, 32)
-dim = 4
+sizes = (32, 32, 32)
+dim = 1
 x = randn(Float64, sizes...)
 y = similar(x)
 xs = range(0.0, 1.0; length=sizes[dim])
 A  = DiffMatrix(collect(xs), WIDTH, ORDER)
 
-At = LinearAlgebra.Adjoint(A)
-println(@elapsed mul!(y, At, x, Val(dim)), )
+# At = LinearAlgebra.Adjoint(A)
+# println(@elapsed mul!(y, At, x, Val(dim)), )
 
-println(@elapsed mul!(y, A, x, Val(dim)))
+# mul!(y, A, x, Val(dim))
+# println(@elapsed mul!(y, A, x, Val(dim)))
 
 # bt = @btime mul!($y, $At, $x, $(Val(dim)))  samples = 40 evals = 1
-b  = @btime mul!($y, $A,  $x, $(Val(dim)))  samples = 40 evals = 1
+b  = @btime mul!($y, $A,  $x, $(Val(dim)))#  samples = 40 evals = 1
 
 
 
