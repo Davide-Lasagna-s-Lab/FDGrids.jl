@@ -1,3 +1,5 @@
+import LinearAlgebra
+
 struct DiffMatrix{T, WIDTH, OPTIMISE} <: AbstractMatrix{T}
     coeffs::Matrix{T} # finite difference weights
       buff::Vector{T} # small buffer for the matvec code
@@ -15,6 +17,13 @@ struct DiffMatrix{T, WIDTH, OPTIMISE} <: AbstractMatrix{T}
 
         return new{T, width, optimise}(T.(coeffs), zeros(T, width))
     end
+end
+
+function LinearAlgebra.adjoint(D::DiffMatrix{T, WIDTH}) where {T, WIDTH}
+    size(D, 1) > 2 * WIDTH ||
+        throw(ArgumentError("can only take adjoint of DiffMatrix if size(D, 1) > 2*WIDTH, " *
+                            "got size=$(size(D,1)), WIDTH=$WIDTH"))
+    return LinearAlgebra.Adjoint(D)
 end
 
 Base.size(d::DiffMatrix) = (size(d.coeffs, 2), size(d.coeffs, 2))
