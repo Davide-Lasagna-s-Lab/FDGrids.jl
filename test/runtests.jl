@@ -155,6 +155,132 @@ end
     end
 end
 
+@testset "test full.                                " begin
+    M = 32
+    width = 3
+
+    # get grid
+    xs = gridpoints(M, -1, 1, 0.5)
+
+    # make grid from -1 to 1 using α = 0.5
+    D1 = DiffMatrix(xs, width, 1)
+
+    # get full matrix
+    D1_full = full(D1)
+
+    for i = 1:M, j = 1:M
+        @test D1_full[i, j] == D1[i, j]
+    end
+end
+
+@testset "test adjoint corner cases                 " begin
+    for width in (3, 5, 7)
+        # exactly 2*WIDTH points — no body, should throw
+        xs_bad = gridpoints(2 * width, -1, 1, 0.5)
+        D_bad = DiffMatrix(xs_bad, width, 1)
+        @test_throws ArgumentError adjoint(D_bad)
+
+        # one below threshold, also should throw
+        xs_bad2 = gridpoints(2 * width - 1, -1, 1, 0.5)
+        D_bad2 = DiffMatrix(xs_bad2, width, 1)
+        @test_throws ArgumentError adjoint(D_bad2)
+
+        # one above threshold: should succeed and return an Adjoint wrapper
+        xs_ok = gridpoints(2 * width + 1, -1, 1, 0.5)
+        D_ok = DiffMatrix(xs_ok, width, 1)
+        @test adjoint(D_ok) isa LinearAlgebra.Adjoint{Float64,<:DiffMatrix}
+    end
+end
+
+@testset "test transpose                            " begin
+    M = 32
+    OTHER = 3
+
+    @testset "N=$N DIM=$DIM width=$width" for N in 1:4, DIM in 1:N, width in (3, 5, 7)
+        # adjoint requires M > 2*WIDTH
+        M > 2 * width || continue
+
+        xs = gridpoints(M, -1, 1, 0.5)
+        D = DiffMatrix(xs, width, 1)
+        Df = full(D)
+        shape = ntuple(d -> d == DIM ? M : OTHER, N)
+
+        w = randn(shape...)
+        y_diffmatrix = similar(w)
+        y_full = similar(w)
+
+        # DiffMatrix transpose
+        mul!(y_diffmatrix, adjoint(D), w, Val(DIM))
+
+        # reference: move DIM to first axis, reshape to (M, :), apply Df',
+        # reshape back — all views, no copies
+        perm = (DIM, setdiff(1:N, DIM)...)
+        inv_perm = invperm(perm)
+        w_p = PermutedDimsArray(w, perm)
+        y_p = PermutedDimsArray(y_full, perm)
+        other = prod(size(w_p)[2:end])
+        w_mat = reshape(w_p, M, other)
+        y_mat = reshape(y_p, M, other)
+        mul!(y_mat, Df', w_mat)
+
+        @test y_diffmatrix ≈ y_full
+    end
+end
+
+@testset "test distributed matmul                   " begin
+    M = 32
+    OTHER = 2
+    xs = gridpoints(M, -1, 1, 0.5)
+
+    @testset "N=$N DIM=$DIM width=$width IS_ADJOINT=$IS_ADJOINT" for N in 1:4,
+        DIM in 1:N,
+        width in (3, 5, 7),
+        IS_ADJOINT in (false, true)
+
+        # adjoint body formula requires M > 2*WIDTH
+        IS_ADJOINT && M ≤ 2 * width && continue
+
+        # For the distributed transpose, the boundary kernels (head/tail) read
+        # x at indices j ± HWIDTH relative to the chunk. This requires
+        # chunk_size > WIDTH + HWIDTH so no access falls outside the chunk.
+        # NCHUNKS=4 satisfies this for width=3 (chunk=8 > 4), but not for
+        # width=5 (chunk=8 < 7) or width=7 (chunk=8 < 10).
+        # NCHUNKS=2 gives chunk=16, which satisfies WIDTH+HWIDTH ≤ 10 for all
+        # widths tested. Use NCHUNKS=2 for the adjoint, 4 for the forward.
+        NCHUNKS = IS_ADJOINT ? 2 : 4
+        chunk_size = M ÷ NCHUNKS
+
+        shape = ntuple(d -> d == DIM ? M : OTHER, N)
+        D = DiffMatrix(xs, width, 1)
+
+        x = zeros(shape...)
+        for I in CartesianIndices(x)
+            x[I] = 1.0 - xs[I[DIM]]^2
+        end
+
+        # reference: full non-distributed multiply
+        y_ref = similar(x)
+        op = IS_ADJOINT ? adjoint(D) : D
+        mul!(y_ref, op, x, Val(DIM))
+
+        # each chunk gets a view of x and y of size chunk_size along DIM;
+        # global_idx shifts A.coeffs column selection to the correct global rows.
+        # boundary points that fall outside a chunk's body are not recomputed —
+        # initialise from reference so the comparison covers only what was written.
+        y_dist = copy(y_ref)
+
+        for k in 1:NCHUNKS
+            g_start = (k - 1) * chunk_size + 1
+            g_end = k == NCHUNKS ? M : k * chunk_size
+            x_view = selectdim(x, DIM, g_start:g_end)
+            y_view = selectdim(y_dist, DIM, g_start:g_end)
+            mul!(y_view, D, x_view, Val(DIM), Val(IS_ADJOINT), g_start, 1:chunk_size)
+        end
+
+        @test y_dist ≈ y_ref
+    end
+end
+
 @testset "test diffmatrix 1st/2nd order - vec       " begin
     # the order of accuracy is the width minus one
     for (width, v1_max, v2_center_max, v2_bndr_max) in zip((3,    5,     7), 
@@ -450,46 +576,6 @@ end
                 @test v3 < v2_bndr_max
             end
         end
-    end
-end
-
-@testset "test distributed matmul                   " begin
-    M = 32
-    OTHER = 2
-    NCHUNKS = 4
-    xs = gridpoints(M, -1, 1, 0.5)
-
-    @testset "N=$N DIM=$DIM width=$width" for N in 1:4, DIM in 1:N, width in (3, 5, 7)
-        HWIDTH = width >> 1
-        chunk_size = M ÷ NCHUNKS
-        shape = ntuple(d -> d == DIM ? M : OTHER, N)
-        D = DiffMatrix(xs, width, 1)
-
-        x = zeros(shape...)
-        for I in CartesianIndices(x)
-            x[I] = 1.0 - xs[I[DIM]]^2
-        end
-
-        # reference: full non-distributed multiply
-        y_ref = similar(x)
-        mul!(y_ref, D, x, Val(DIM))
-
-        # each chunk gets a view of x and y of size chunk_size along DIM;
-        # global_idx shifts A.coeffs column selection to the correct global rows.
-        # boundary points within interior chunks (first/last HWIDTH indices)
-        # are not computed — initialise from reference so the final comparison
-        # covers only what each chunk actually wrote.
-        y_dist = copy(y_ref)
-
-        for k in 1:NCHUNKS
-            g_start = (k - 1) * chunk_size + 1
-            g_end = k == NCHUNKS ? M : k * chunk_size
-            x_view = selectdim(x, DIM, g_start:g_end)
-            y_view = selectdim(y_dist, DIM, g_start:g_end)
-            mul!(y_view, D, x_view, Val(DIM), g_start, 1:chunk_size)
-        end
-
-        @test y_dist ≈ y_ref
     end
 end
 
