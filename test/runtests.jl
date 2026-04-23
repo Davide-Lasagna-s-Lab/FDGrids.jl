@@ -192,6 +192,26 @@ end
     end
 end
 
+@testset "test adjoint identity                     " begin
+    M = 1024
+
+    for ORDER in [1, 2]
+        for WIDTH in [3, 5, 7]
+            for xs in [range(-1, stop=1, length=M), gridpoints(M, -1, 1, 0.5)]
+                D = DiffMatrix(xs, WIDTH, ORDER)
+
+                v = randn(M)
+                w = randn(M)
+
+                a = v' * mul!(zeros(M), D, w)
+                b = mul!(zeros(M), adjoint(D), v)' * w
+                    
+                @test a ≈ b
+            end
+        end
+    end
+end
+
 @testset "test transpose                            " begin
     M = 32
     OTHER = 3
