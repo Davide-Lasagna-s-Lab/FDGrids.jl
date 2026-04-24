@@ -1,36 +1,18 @@
-# ----------------
+# ================================================================================
 # HELPER FUNCTIONS
-# ----------------
+# ================================================================================
 
 """
     _make_ref(array, expr, DIM, N) -> Expr
 
 Construct an array-indexing expression for use in generated code.
 
-The returned AST has the form
-
-    array[i1, i2, ..., iN]
-
-where each index is the loop variable `Symbol(:i, d)`, except along dimension
-`DIM`, whose index is replaced by `expr`. This is a small utility used when
-building the generated stencil kernels.
-
-# Arguments
-- `array`: Symbol naming the array to index, such as `:x` or `:y`.
-- `expr`: Expression to place in the `DIM`-th index position.
-- `DIM`: Target dimension, using 1-based indexing.
-- `N`: Total number of array dimensions.
-
-# Returns
-- An `Expr(:ref, ...)` representing the indexed array access.
+The returned AST has the form `array[i1, i2, ..., iN]` where each index is
+`Symbol(:i, d)`, except along dimension `DIM`, whose index is replaced by `expr`.
 
 # Examples
 - `_make_ref(:x, :1, 2, 4)` produces `:(x[i1, 1, i3, i4])`
-- `_make_ref(:x, :(base + p), 3, 4)` produces `:(x[i1, i2, base + p, i4])`
-
-# Notes
-This function does not validate `DIM` or `N`; callers are expected to pass
-consistent values.
+- `_make_ref(:x, :(i1 - 2), 1, 3)` produces `:(x[i1 - 2, i2, i3])`
 """
 function _make_ref(array, expr, DIM, N)
     inds = ntuple(d -> d == DIM ? expr : Symbol(:i, d), N)
@@ -38,31 +20,21 @@ function _make_ref(array, expr, DIM, N)
 end
 
 
-"""
-    _make_kernel_expr(DIM, WIDTH, N, base, ::Val{false}) -> Expr
+# ================================================================================
+# FORWARD KERNELS
+# ================================================================================
 
-Build the forward stencil kernel for one grid point. The emitted code evaluates
+"""
+    _make_kernel_forward(DIM, WIDTH, N, base) -> Expr
+
+Emit the forward stencil kernel for one grid point:
 
     s = Σ_{p=0}^{WIDTH-1}  A.coeffs[1+p, global_idx-1+index] · x[..., base+p, ...]
     y[..., index, ...] = s
 
-where `index = Symbol(:i, DIM)` is the loop variable along the differentiated
-dimension. The summation is unrolled at code-generation time.
-
-# Arguments
-- `DIM`: Differentiation dimension.
-- `WIDTH`: Number of stencil points.
-- `N`: Total number of dimensions of `x` and `y`.
-- `base`: Expression for the first index of the stencil window along `DIM`.
-  Typical values are `:1` (head), `:(index - HWIDTH)` (body), or
-  `:(size(x, DIM) - WIDTH + 1)` (tail).
-
-# Expected runtime bindings
-`A`, `x`, `y`, and `global_idx` must be in scope in the emitted code.
-`global_idx` is `1` in the non-distributed case and greater than `1` when
-the operator is applied to a local slice of a globally indexed dimension.
+`base` is the first stencil index; the sum is unrolled at code-generation time.
 """
-function _make_kernel_expr(DIM, WIDTH, N, base, ::Val{false})
+function _make_kernel_forward(DIM, WIDTH, N, base)
     index = Symbol(:i, DIM)
     return quote
         s = A.coeffs[1, global_idx - 1 + $index] * $(_make_ref(:x, base, DIM, N))
@@ -74,193 +46,174 @@ function _make_kernel_expr(DIM, WIDTH, N, base, ::Val{false})
     end
 end
 
-
 """
-    _make_kernel_expr(DIM, WIDTH, N, base, ::Val{true}) -> Expr
+    _make_loop_expr_forward(DIM, N, WIDTH) -> Expr
 
-Build the transpose stencil kernel for one body grid point.
-
-In the body region, `left(i) = i - HWIDTH` is unclamped, so the coefficient
-slot for `A^T[index, i]` follows the clean anti-diagonal formula:
-
-    slot = WIDTH - p   for row  i = base + p
-
-This gives
-
-    s = Σ_{p=0}^{WIDTH-1}  A.coeffs[WIDTH-p, base+p] · x[..., base+p, ...]
-    y[..., index, ...] = s
-
-where `base = index - HWIDTH`.
-
-This kernel is correct only in the body region. For head and tail use
-`_make_kernel_transpose_head` and `_make_kernel_transpose_tail` respectively,
-where the clamped `left(i)` changes the coefficient slot formula.
+Construct the full nested loop for the forward operator along dimension `DIM`.
+Splits the axis into head/body/tail with boundary regions of width `HWIDTH`.
 """
-function _make_kernel_expr(DIM, WIDTH, N, base, ::Val{true})
-    index = Symbol(:i, DIM)
-    return quote
-        # A.coeffs columns are global: offset local base by global_idx - 1.
-        # The x accesses use local base — the stencil window is the same in both cases.
-        s = A.coeffs[$WIDTH, global_idx - 1 + $base] * $(_make_ref(:x, base, DIM, N))
-        Base.Cartesian.@nexprs $(WIDTH - 1) p -> begin
-            s += A.coeffs[$WIDTH - p, global_idx - 1 + ($base) + p] *
-                 $(_make_ref(:x, :(($base) + p), DIM, N))
-        end
-        $(_make_ref(:y, index, DIM, N)) = s
+function _make_loop_expr_forward(DIM, N, WIDTH)
+    index  = Symbol(:i, DIM)
+    HWIDTH = WIDTH >> 1
+
+    # ---- preamble: boundary ranges and flags (all loop-invariant) ----
+    preamble = quote
+        head_range = max(1, local_rng[1]):min($HWIDTH, local_rng[end])
+        body_range = max($HWIDTH + 1, local_rng[1]):min(size(x, $DIM) - $HWIDTH, local_rng[end])
+        tail_range = max(size(x, $DIM) - $HWIDTH + 1, local_rng[1]):min(size(x, $DIM), local_rng[end])
+        has_head   = global_idx == 1 && local_rng[1] ≤ $HWIDTH
+        has_tail   = global_idx + local_rng[end] - 1 > size(A, 1) - $HWIDTH
     end
+
+    head_kernel = _make_kernel_forward(DIM, WIDTH, N, :1)
+    body_kernel = _make_kernel_forward(DIM, WIDTH, N, :($index - $HWIDTH))
+    tail_kernel = _make_kernel_forward(DIM, WIDTH, N, :(size(x, $DIM) - $WIDTH + 1))
+
+    return _wrap_loop(DIM, N, preamble, index, head_kernel, body_kernel, tail_kernel)
 end
 
 
+# ================================================================================
+# ADJOINT KERNELS
+# All three read from the precomputed transposed coefficient matrices stored in A
+# (head_coeffs_T, body_coeffs_T, tail_coeffs_T), giving unit-stride column access.
+# ================================================================================
+
 """
-    _make_kernel_transpose_head(DIM, WIDTH, N) -> Expr
+    _make_kernel_adjoint_head(DIM, WIDTH, N) -> Expr
 
-Build the transpose stencil kernel for head output points (`index ∈ 1:WIDTH`).
+Emit the transpose stencil kernel for head output points (`index ∈ 1:WIDTH`).
 
-For head output j, the contributing rows are all i such that D[i,j] ≠ 0. In the
-head region, this includes head-clamped rows (left=1) and body rows whose stencil
-window reaches back to j. The full set is i ∈ 1:(j+HWIDTH), which grows with j —
-so the loop bound is runtime rather than a compile-time constant.
+For head output `j`, contributing rows are `i = 1:(j+HWIDTH)` — a runtime upper
+bound that grows with `j`. The kernel reads column `index` of `A.head_coeffs_T`
+top-to-bottom (unit-stride in column-major storage).
 
-`getindex` computes the correct coefficient for any (row, col) pair, handling
-clamped and unclamped rows transparently, and returning zero outside the stencil.
-This kernel only fires when `global_idx == 1` (first process), so local indices
-equal global indices and no offset is needed.
+This kernel only fires when `global_idx == 1`, so local and global indices coincide
+and no offset is needed.
 """
-function _make_kernel_transpose_head(DIM, WIDTH, N)
+function _make_kernel_adjoint_head(DIM, WIDTH, N)
     index  = Symbol(:i, DIM)
     HWIDTH = WIDTH >> 1
     return quote
         s = zero(eltype(y))
         for _row in 1:($index + $HWIDTH)
-            s += A[_row, $index] * $(_make_ref(:x, :_row, DIM, N))
+            s += A.head_coeffs_T[_row, $index] * $(_make_ref(:x, :_row, DIM, N))
         end
         $(_make_ref(:y, index, DIM, N)) = s
     end
 end
 
-
 """
-    _make_kernel_transpose_tail(DIM, WIDTH, N) -> Expr
+    _make_kernel_adjoint_body(DIM, WIDTH, N) -> Expr
 
-Build the transpose stencil kernel for tail output points (`index ∈ N-WIDTH+1:N`).
+Emit the transpose stencil kernel for body output points (`index ∈ WIDTH+1:N-WIDTH`).
 
-For tail output j, the contributing rows are all i such that D[i,j] ≠ 0. This
-includes tail-clamped rows (left=N-WIDTH+1) and body rows whose stencil window
-reaches forward to j. The full set is i ∈ (j-HWIDTH):N — the lower bound shrinks
-as j decreases toward N-WIDTH+1, so the loop bound is runtime rather than a
-compile-time constant. This is exactly the symmetric counterpart of
-`_make_kernel_transpose_head`.
-
-`getindex` computes the correct coefficient for any (row, col) pair. For the
-distributed case, `_row` is a local index into x, while A is addressed with
-global coordinates (`global_idx - 1` offsets both row and column).
+The anti-diagonal remap is precomputed in `A.body_coeffs_T`. Column
+`jb = global_idx-1+index-WIDTH` gives the WIDTH coefficients in the order
+they multiply `x[index-HWIDTH], ..., x[index+HWIDTH]`. Both reads are unit-stride.
+The sum is unrolled at code-generation time.
 """
-function _make_kernel_transpose_tail(DIM, WIDTH, N)
+function _make_kernel_adjoint_body(DIM, WIDTH, N)
     index  = Symbol(:i, DIM)
     HWIDTH = WIDTH >> 1
     return quote
-        s = zero(eltype(y))
-        # _row is a local index; convert to global for A, keep local for x
-        for _row in ($index - $HWIDTH):size(x, $DIM)
-            s += A[global_idx - 1 + _row, global_idx - 1 + $index] *
-                 $(_make_ref(:x, :_row, DIM, N))
+        # jb = global output j - WIDTH; offset by global_idx for distributed calls
+        s = A.body_coeffs_T[1, global_idx - 1 + $index - $WIDTH] *
+            $(_make_ref(:x, :($index - $HWIDTH), DIM, N))
+        Base.Cartesian.@nexprs $(WIDTH - 1) p -> begin
+            s += A.body_coeffs_T[1 + p, global_idx - 1 + $index - $WIDTH] *
+                 $(_make_ref(:x, :($index - $HWIDTH + p), DIM, N))
         end
         $(_make_ref(:y, index, DIM, N)) = s
     end
 end
 
+"""
+    _make_kernel_adjoint_tail(DIM, WIDTH, N) -> Expr
+
+Emit the transpose stencil kernel for tail output points (`index ∈ N-WIDTH+1:N`).
+
+For tail output `j`, contributing rows are `i = j-HWIDTH:N`. The local column
+`jt` into `A.tail_coeffs_T` is computed once per output point. Reading down
+column `jt` from row `jt` (unit-stride) while reading `x[index-HWIDTH:end]`
+(unit-stride).
+
+For distributed calls, `_lr` is a local x-index; `A.tail_coeffs_T` already absorbs
+global row indices at adjoint-construction time, so `jt` is the only offset needed.
+"""
+function _make_kernel_adjoint_tail(DIM, WIDTH, N)
+    index  = Symbol(:i, DIM)
+    HWIDTH = WIDTH >> 1
+    return quote
+        # jt: 1-based local column into tail_coeffs_T
+        jt = global_idx - 1 + $index - size(A, 1) + $WIDTH
+        s  = zero(eltype(y))
+        for _lr in ($index - $HWIDTH):size(x, $DIM)
+            # tail_coeffs_T row = jt + (_lr - index + HWIDTH), unit-stride as _lr increases
+            s += A.tail_coeffs_T[jt + _lr - $index + $HWIDTH, jt] *
+                 $(_make_ref(:x, :_lr, DIM, N))
+        end
+        $(_make_ref(:y, index, DIM, N)) = s
+    end
+end
 
 """
-    _make_loop_expr(DIM, N, WIDTH, IS_ADJOINT) -> Expr
+    _make_loop_expr_adjoint(DIM, N, WIDTH) -> Expr
 
-Construct the full nested loop expression that applies the finite-difference
-stencil (or its transpose) along dimension `DIM`.
+Construct the full nested loop for the adjoint operator along dimension `DIM`.
 
-The generated code splits the differentiated axis into three regions:
-
-- **head**: points near the left boundary, where the stencil is pinned to the
-  start of the domain.
-- **body**: interior points, where the stencil is centred.
-- **tail**: points near the right boundary, where the stencil is pinned to the
-  end of the domain.
-
-For the forward operator (`IS_ADJOINT = false`), all three kernels use
-`_make_kernel_expr(..., Val(false))` with the appropriate pinned `base`.
-
-For the transpose operator (`IS_ADJOINT = true`), the body uses the clean
-anti-diagonal formula via `_make_kernel_expr(..., Val(true))`, while the head
-and tail use `_make_kernel_transpose_head` and `_make_kernel_transpose_tail`
-respectively, which handle the clamped `left(i)` formula correctly without
-any runtime dispatch into `getindex`.
-
-# Arguments
-- `DIM`: Differentiation dimension.
-- `N`: Number of array dimensions.
-- `WIDTH`: Stencil width (expected to be odd).
-- `IS_ADJOINT`: `Bool` compile-time flag; `true` selects the transpose kernels.
-
-# Structure of the generated code
-1. A preamble computes `head_range`, `body_range`, `tail_range`, and the flags
-   `has_head` and `has_tail`. All of these are loop-invariant; LLVM hoists the
-   flag checks outside the loop automatically.
-2. Three stencil kernels are selected based on `IS_ADJOINT`.
-3. The kernels are wrapped in loops over all dimensions so that dimension 1
-   is the fastest-running index (column-major layout).
-
-# Expected runtime bindings
-`A`, `x`, `y`, `global_idx`, `local_rng`, and `N1, N2, ..., NN` must be in
-scope in the emitted code.
+Boundary regions span `WIDTH` outputs on each side (wider than the forward case)
+because the body kernel `body_coeffs_T` is only valid for outputs `j ∈ WIDTH+1:N-WIDTH`:
+the anti-diagonal formula requires all contributing rows to be unclamped body rows.
 """
-function _make_loop_expr(DIM, N, WIDTH, IS_ADJOINT)
+function _make_loop_expr_adjoint(DIM, N, WIDTH)
     index  = Symbol(:i, DIM)
     HWIDTH = WIDTH >> 1
 
-    # ---- preamble: compute ranges and boundary flags at runtime ----
-    # These are all loop-invariant; LLVM will hoist the has_head/has_tail
-    # checks outside the generated loop automatically.
-    #
-    # Forward: boundary regions span HWIDTH outputs each side — exactly where
-    # the stencil is pinned rather than centred.
-    #
-    # Transpose: boundary regions must span WIDTH outputs each side. The
-    # anti-diagonal body formula A.coeffs[WIDTH-p, base+p] is only valid when
-    # every contributing row i is a pure body row (left(i) = i-HWIDTH unclamped).
-    # For output j, the contributing rows are i ∈ j-HWIDTH:j+HWIDTH. Row i is
-    # a body row only when i > HWIDTH and i ≤ N-HWIDTH. The most restrictive
-    # condition is i=j-HWIDTH > HWIDTH → j > WIDTH, and i=j+HWIDTH ≤ N-HWIDTH
-    # → j ≤ N-WIDTH. So the body formula is safe only for j ∈ WIDTH+1:N-WIDTH.
-    preamble = if IS_ADJOINT
-        quote
-            head_range = max(1, local_rng[1]):min($WIDTH, local_rng[end])
-            body_range = max($WIDTH + 1, local_rng[1]):min(size(x, $DIM) - $WIDTH, local_rng[end])
-            tail_range = max(size(x, $DIM) - $WIDTH + 1, local_rng[1]):min(size(x, $DIM), local_rng[end])
-            has_head   = global_idx == 1 && local_rng[1] ≤ $WIDTH
-            has_tail   = global_idx + local_rng[end] - 1 > size(A, 1) - $WIDTH
-        end
-    else
-        quote
-            head_range = max(1, local_rng[1]):min($HWIDTH, local_rng[end])
-            body_range = max($HWIDTH + 1, local_rng[1]):min(size(x, $DIM) - $HWIDTH, local_rng[end])
-            tail_range = max(size(x, $DIM) - $HWIDTH + 1, local_rng[1]):min(size(x, $DIM), local_rng[end])
-            has_head   = global_idx == 1 && local_rng[1] ≤ $HWIDTH
-            has_tail   = global_idx + local_rng[end] - 1 > size(A, 1) - $HWIDTH
-        end
+    # ---- preamble: wider boundary regions than forward (WIDTH, not HWIDTH) ----
+    # The anti-diagonal body formula is valid only for j ∈ WIDTH+1:N-WIDTH.
+    # For output j, the outermost contributing rows i=j±HWIDTH are body rows only
+    # when j > WIDTH and j ≤ N-WIDTH.
+    preamble = quote
+        head_range = max(1, local_rng[1]):min($WIDTH, local_rng[end])
+        body_range = max($WIDTH + 1, local_rng[1]):min(size(x, $DIM) - $WIDTH, local_rng[end])
+        tail_range = max(size(x, $DIM) - $WIDTH + 1, local_rng[1]):min(size(x, $DIM), local_rng[end])
+        has_head   = global_idx == 1 && local_rng[1] ≤ $WIDTH
+        has_tail   = global_idx + local_rng[end] - 1 > size(A, 1) - $WIDTH
     end
 
-    # ---- kernels: one per region, selected at code-generation time ----
-    if IS_ADJOINT
-        head_kernel = _make_kernel_transpose_head(DIM, WIDTH, N)
-        body_kernel = _make_kernel_expr(DIM, WIDTH, N, :($index - $HWIDTH), Val(true))
-        tail_kernel = _make_kernel_transpose_tail(DIM, WIDTH, N)
-    else
-        head_kernel = _make_kernel_expr(DIM, WIDTH, N, :1,                            Val(false))
-        body_kernel = _make_kernel_expr(DIM, WIDTH, N, :($index - $HWIDTH),           Val(false))
-        tail_kernel = _make_kernel_expr(DIM, WIDTH, N, :(size(x, $DIM) - $WIDTH + 1), Val(false))
-    end
+    head_kernel = _make_kernel_adjoint_head(DIM, WIDTH, N)
+    body_kernel = _make_kernel_adjoint_body(DIM, WIDTH, N)
+    tail_kernel = _make_kernel_adjoint_tail(DIM, WIDTH, N)
 
-    # ---- phase 1: wrap kernels in inner loops for d < DIM ----
-    # Iterating 1:DIM-1 means d=1 is wrapped first and ends up innermost,
-    # keeping i1 as the fastest-running index (column-major order).
+    return _wrap_loop(DIM, N, preamble, index, head_kernel, body_kernel, tail_kernel)
+end
+
+
+# ================================================================================
+# SHARED LOOP-WRAPPING UTILITY
+# ================================================================================
+
+"""
+    _wrap_loop(DIM, N, preamble, index, head_kernel, body_kernel, tail_kernel) -> Expr
+
+Wrap three stencil kernels in the standard nested loop structure:
+
+1. **Phase 1** (inner loops, `d < DIM`): wrap each kernel in loops over dimensions
+   below `DIM`, iterating `1:Nd` for each. `d=1` is wrapped first and ends up
+   innermost, keeping `i1` as the fastest-running index (column-major).
+
+2. **Phase 2** (stencil dimension): a block with conditional head/body/tail loops.
+   `has_head` and `has_tail` are loop-invariant booleans; LLVM hoists the checks
+   outside the generated loop automatically.
+
+3. **Phase 3** (outer loops, `d > DIM`): wrap in loops over dimensions above `DIM`.
+
+The `preamble` expression computes all ranges and flags before the loops begin.
+"""
+function _wrap_loop(DIM, N, preamble, index, head_kernel, body_kernel, tail_kernel)
+
+    # phase 1: inner loops for d < DIM (d=1 wrapped first → innermost)
     inner_head = head_kernel
     inner_body = body_kernel
     inner_tail = tail_kernel
@@ -271,8 +224,7 @@ function _make_loop_expr(DIM, N, WIDTH, IS_ADJOINT)
         inner_tail = Expr(:for, Expr(:(=), Symbol(:i, d), rng), inner_tail)
     end
 
-    # ---- phase 2: stencil dimension block ----
-    # head and tail are guarded by loop-invariant flags; body always runs.
+    # phase 2: stencil dimension block
     dim_block = quote
         if has_head
             for $index in head_range
@@ -289,7 +241,7 @@ function _make_loop_expr(DIM, N, WIDTH, IS_ADJOINT)
         end
     end
 
-    # ---- phase 3: wrap in outer loops for d > DIM ----
+    # phase 3: outer loops for d > DIM
     loop = dim_block
     for d in DIM+1:N
         rng  = :(1:$(Symbol(:N, d)))
@@ -303,18 +255,18 @@ function _make_loop_expr(DIM, N, WIDTH, IS_ADJOINT)
 end
 
 
-# ----------------
-# PUBLIC INTERFACE
-# ----------------
+# ================================================================================
+# PUBLIC INTERFACE — forward DiffMatrix
+# ================================================================================
 
 """
     LinearAlgebra.mul!(y, A::DiffMatrix, x, ::Val{DIM}=Val(1)) -> y
 
-Apply the finite-difference operator `A` to `x` along dimension `DIM`, writing
-the result into `y`.
+Apply the forward finite-difference operator `A` to `x` along dimension `DIM`,
+writing the result into `y`.
 
-This is the standard non-distributed entry point. It delegates to the
-lower-level method with `global_idx = 1` and `local_rng = 1:size(x, DIM)`.
+Non-distributed entry point; delegates to the lower-level method with
+`global_idx=1` and `local_rng=1:size(x,DIM)`.
 
 # Requirements
 - `size(x, DIM) == size(y, DIM) == size(A.coeffs, 2)`.
@@ -322,80 +274,38 @@ lower-level method with `global_idx = 1` and `local_rng = 1:size(x, DIM)`.
 function LinearAlgebra.mul!(y::AbstractArray{S, N},
                             A::DiffMatrix{T, WIDTH},
                             x::AbstractArray{S, N},
-                             ::Val{DIM}=Val(1)) where {T, S, N, WIDTH, DIM}
+                             ::Val{DIM}  = Val(1)) where {T, S, N, WIDTH, DIM}
     size(x, DIM) == size(y, DIM) == size(A.coeffs, 2) ||
         throw(ArgumentError("inconsistent inputs size"))
-    return LinearAlgebra.mul!(y, A, x, Val(DIM), Val(false), 1, 1:size(x, DIM))
+    return LinearAlgebra.mul!(y, A, x, Val(DIM), 1, 1:size(x, DIM))
 end
 
-
 """
-    LinearAlgebra.mul!(y, At::Adjoint{<:DiffMatrix}, x, ::Val{DIM}=Val(1)) -> y
+    LinearAlgebra.mul!(y, A::DiffMatrix, x, ::Val{DIM}, global_idx, local_rng) -> y
 
-Apply the transpose of the finite-difference operator to `x` along dimension
-`DIM`, writing the result into `y`.
+Distribution-aware backend for the forward operator.
 
-`At.parent` is extracted immediately so that the concrete `DiffMatrix` type
-flows into the lower-level `@generated` method without any Union dispatch.
-
-# Requirements
-- `size(x, DIM) == size(y, DIM) == size(At.parent.coeffs, 2)`.
-"""
-function LinearAlgebra.mul!(y::AbstractArray{S, N},
-                           At::LinearAlgebra.Adjoint{<:Any, <:DiffMatrix{T, WIDTH}},
-                            x::AbstractArray{S, N},
-                             ::Val{DIM}=Val(1)) where {T, S, N, WIDTH, DIM}
-    A = At.parent
-    size(x, DIM) == size(y, DIM) == size(A.coeffs, 2) ||
-        throw(ArgumentError("inconsistent inputs size"))
-    return LinearAlgebra.mul!(y, A, x, Val(DIM), Val(true), 1, 1:size(x, DIM))
-end
-
-
-"""
-    LinearAlgebra.mul!(y, A::DiffMatrix, x, ::Val{DIM}, ::Val{IS_ADJOINT},
-                       global_idx, local_rng) -> y
-
-Distribution-aware backend for applying `A` (or its transpose) along dimension
-`DIM` over a local subrange.
-
-This is a `@generated` function: the loop nest, stencil unrolling, and
-head/body/tail kernel selection are all fully specialised at compile time for
-the concrete `(T, N, WIDTH, DIM, IS_ADJOINT)` combination.
+`@generated` function: the loop nest, stencil unrolling, and head/body/tail
+kernel selection are all specialised at compile time for the concrete
+`(T, N, WIDTH, DIM)` combination.
 
 # Arguments
-- `y`: Destination array.
-- `A`: Finite-difference operator (always the forward `DiffMatrix`, even for
-  the transpose case — the caller extracts `At.parent` before calling this).
-- `x`: Source array.
-- `Val(DIM)`: Differentiation dimension, known at compile time.
-- `Val(IS_ADJOINT)`: `Val(false)` for forward, `Val(true)` for transpose.
-- `global_idx::Int`: Global index of `local_rng[1]` in the row numbering of
-  `A.coeffs`. Set to `1` for non-distributed calls.
-- `local_rng::UnitRange`: Local portion of dimension `DIM` to process.
-
-# Notes
-Do not call this method directly unless you need distributed or blockwise
-application. Use the higher-level `mul!(y, A, x, Val(DIM))` entry points.
+- `global_idx`: Global index of `local_rng[1]` in the row numbering of `A.coeffs`.
+  Set to `1` for non-distributed calls.
+- `local_rng`: Local portion of dimension `DIM` to process.
 """
 @generated function LinearAlgebra.mul!(y::AbstractArray{T, N},
                                        A::DiffMatrix{TD, WIDTH},
                                        x::AbstractArray{T, N},
                                         ::Val{DIM},
-                                        ::Val{IS_ADJOINT},
                               global_idx::Int,
-                               local_rng::UnitRange) where {T, TD, N, WIDTH, DIM, IS_ADJOINT}
-    # compile-time safety check
+                               local_rng::UnitRange) where {T, TD, N, WIDTH, DIM}
     DIM in 1:N || throw(ArgumentError("inconsistent differentiation dimension"))
 
-    # build the full nested loop expression at compile time
-    block = _make_loop_expr(DIM, N, WIDTH, IS_ADJOINT)
-
-    # symbols for the sizes of each dimension, e.g. N1, N2, N3
-    Ni = [Symbol(:N, d) for d in 1:N]
+    block = _make_loop_expr_forward(DIM, N, WIDTH)
+    Ni    = [Symbol(:N, d) for d in 1:N]
 
     return quote
-        # runtime sanity checks
         size(x, $DIM) == size(y, $DIM) ||
             throw(ArgumentError("inconsistent inputs size"))
         local_rng[1] > 0 && local_rng[end] ≤ size(x, $DIM) ||
@@ -403,7 +313,6 @@ application. Use the higher-level `mul!(y, A, x, Val(DIM))` entry points.
         global_idx > 0 && global_idx + local_rng[end] - 1 ≤ size(A, 1) ||
             throw(ArgumentError("out of bounds global/local range specification"))
 
-        # destructure size(y) into N1, N2, ... for use in the generated loops
         $(Expr(:(=), Expr(:tuple, Ni...), :(size(y))))
 
         @inbounds begin
@@ -415,17 +324,92 @@ application. Use the higher-level `mul!(y, A, x, Val(DIM))` entry points.
 end
 
 
+# ================================================================================
+# PUBLIC INTERFACE — AdjointDiffMatrix
+# ================================================================================
+
+"""
+    LinearAlgebra.mul!(y, A::AdjointDiffMatrix, x, ::Val{DIM}=Val(1)) -> y
+
+Apply the transposed finite-difference operator `A = D*` to `x` along dimension
+`DIM`, writing the result into `y`.
+
+Uses the precomputed coefficient matrices in `A` for unit-stride access throughout.
+Non-distributed entry point.
+
+# Requirements
+- `size(x, DIM) == size(y, DIM) == size(A.parent.coeffs, 2)`.
+"""
+function LinearAlgebra.mul!(y::AbstractArray{S, N},
+                            A::AdjointDiffMatrix{T, WIDTH},
+                            x::AbstractArray{S, N},
+                             ::Val{DIM}  = Val(1)) where {T, S, N, WIDTH, DIM}
+    size(x, DIM) == size(y, DIM) == size(A.parent.coeffs, 2) ||
+        throw(ArgumentError("inconsistent inputs size"))
+    return LinearAlgebra.mul!(y, A, x, Val(DIM), 1, 1:size(x, DIM))
+end
+
+"""
+    LinearAlgebra.mul!(y, A::AdjointDiffMatrix, x, ::Val{DIM}, global_idx, local_rng) -> y
+
+Distribution-aware backend for the adjoint operator.
+
+`@generated` function specialised at compile time for the concrete
+`(T, N, WIDTH, DIM)` combination. The head/body/tail kernels read from
+`A.head_coeffs_T`, `A.body_coeffs_T`, and `A.tail_coeffs_T` respectively —
+the same unit-stride column-access pattern as the forward `mul!`.
+
+# Arguments
+- `global_idx`: Global index of `local_rng[1]`. Set to `1` for non-distributed calls.
+- `local_rng`: Local portion of dimension `DIM` to process.
+
+# Notes
+For the adjoint, boundary regions span `WIDTH` outputs on each side (vs `HWIDTH`
+for the forward operator) because the body formula is only valid for outputs
+`j ∈ WIDTH+1:N-WIDTH`.
+"""
+@generated function LinearAlgebra.mul!(y::AbstractArray{T, N},
+                                       A::AdjointDiffMatrix{TD, WIDTH},
+                                       x::AbstractArray{T, N},
+                                        ::Val{DIM},
+                              global_idx::Int,
+                               local_rng::UnitRange) where {T, TD, N, WIDTH, DIM}
+    DIM in 1:N || throw(ArgumentError("inconsistent differentiation dimension"))
+
+    block = _make_loop_expr_adjoint(DIM, N, WIDTH)
+    Ni    = [Symbol(:N, d) for d in 1:N]
+
+    return quote
+        size(x, $DIM) == size(y, $DIM) ||
+            throw(ArgumentError("inconsistent inputs size"))
+        local_rng[1] > 0 && local_rng[end] ≤ size(x, $DIM) ||
+            throw(ArgumentError("out of bounds local range specification"))
+        global_idx > 0 && global_idx + local_rng[end] - 1 ≤ size(A, 1) ||
+            throw(ArgumentError("out of bounds global/local range specification"))
+
+        $(Expr(:(=), Expr(:tuple, Ni...), :(size(y))))
+
+        @inbounds begin
+            $block
+        end
+
+        return y
+    end
+end
+
+
+# ================================================================================
+# Point evaluation
+# ================================================================================
+
 """
     LinearAlgebra.mul!(A::DiffMatrix{T, WIDTH}, x::AbstractVector, i::Int)
 
-Evaluate row `i` of the finite-difference operator `A` applied to `x`.
+Evaluate row `i` of the forward operator `A` applied to `x`. Returns the scalar
 
-Returns the scalar
+    Σ_{p=0}^{WIDTH-1}  A.coeffs[1+p, i] * x[left+p]
 
-    sum(A.coeffs[1+p, i] * x[left+p] for p = 0:WIDTH-1)
-
-where `left` is the clamped stencil start index. The stencil sum is unrolled
-at generation time.
+where `left` is the clamped stencil start. The sum is unrolled at generation time.
 
 # Requirements
 - `length(x) == size(A, 2)`.
@@ -438,7 +422,6 @@ at generation time.
 
         size(A, 2) == N || throw(DimensionMismatch())
 
-        # index of the first element of the stencil
         left = clamp(i - $WIDTH >> 1, 1, N - $WIDTH + 1)
 
         val = A.coeffs[1, i] * x[left]
