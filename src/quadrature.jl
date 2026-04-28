@@ -1,46 +1,59 @@
 export quadweights, _quadweights
 
-# Compute quadrature weights for mesh points xs for a 
-# composite rule using polynomials of order `order`.
+# The primary API for grid points and quadrature weights is `grid(M, l, h, dist)`
+# in grids.jl, which returns both together. The functions below are retained for
+# backward compatibility with existing code that calls `quadweights(xs, order)`.
+
+"""
+    quadweights(xs::AbstractVector, order::Int) -> Vector{Float64}
+
+Composite Newton-Cotes quadrature weights for arbitrary node positions `xs`,
+using panels of `order+1` points exact for polynomials of degree `order`.
+
+Weights may be negative for high `order` or non-uniform `xs`. For new code,
+prefer `grid(M, l, h, dist)` which returns points and weights together using
+a rule matched to the grid distribution.
+
+# Arguments
+- `xs`: Mesh points. Need not be sorted; decreasing inputs are handled internally.
+- `order`: Polynomial degree of the local rule (1 = trapezoidal, 2 = Simpson, …).
+"""
 function quadweights(xs::AbstractVector, order::Int)
-    # check data is increasing
-    # issorted(xs) || throw(ArgumentError("input not sorted"))
-    issorted(xs) ? (xs_sorted = xs) : (xs_sorted = reverse(xs))
+    xs_sorted = issorted(xs) ? xs : reverse(xs)
 
-    # number of points
-    N = length(xs_sorted)
+    N  = length(xs_sorted)
+    ws = zeros(N)
 
-    # partition xs so that we have at at least order+1 points
-    w = zeros(length(xs_sorted))
-
-    # ii and ie and the initial and final indices 
-    ii, ie = 1, 1
-    while ie < N
+    ii = 1
+    while ii < N
         ie = ii + order
-        # if the next interval is smaller, just go till the end
         ie = N - ie < order ? N : ie
-        rng = ii:ie
-        w[rng] += _quadweights(xs_sorted[rng])
+        ws[ii:ie] .+= _quadweights(view(xs_sorted, ii:ie))
         ii = ie
     end
 
-    # return to original order if originally reversed
-    issorted(xs) ? nothing : reverse!(w)
+    issorted(xs) || reverse!(ws)
 
-    return w
+    return ws
 end
 
-# http://www2.math.umd.edu/~dlevy/classes/amsc466/lecture-notes/integration-chap.pdf
+
+"""
+    _quadweights(xs::AbstractVector) -> Vector{Float64}
+
+Exact quadrature weights for a single panel of nodes `xs` by solving the
+Vandermonde system for monomial exactness up to degree `length(xs)-1`:
+
+    A w = b,    A[d+1, i] = xs[i]^d,    b[d+1] = (xs[end]^{d+1} - xs[1]^{d+1}) / (d+1)
+
+For two nodes returns the trapezoidal weights `[h, h]/2`. For three equally-spaced
+nodes returns Simpson weights `[1, 4, 1]*h/3`.
+
+Weights may be negative for large or non-uniform panels.
+"""
 function _quadweights(xs::AbstractVector)
-    # number of points
     N = length(xs)
-
-    # find integral of polynomial of degree d from xs[1] to xs[N]
-    b = [(xs[end]^(d+1) - xs[1]^(d+1))/(d+1) for d = 0:N-1]
-
-    # evaluate polynomial up to degree d on points
-    A = [xs[i]^d for d=0:N-1, i = 1:N]
-
-    # return weights
-    return A\b
+    b = [(xs[end]^(d + 1) - xs[1]^(d + 1)) / (d + 1) for d in 0:N-1]
+    A = [xs[i]^d for d in 0:N-1, i in 1:N]
+    return A \ b
 end
