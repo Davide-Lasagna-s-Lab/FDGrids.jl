@@ -143,7 +143,7 @@ end
     @inbounds begin
         for j = n:-1:(n-$WD+1)
             b[j] = $op(b[j], U[j, j])
-            for i = max(1, j-$WIDTH - 1):j-1
+            for i = max(1, j-$WIDTH+1):j-1
                 b[i] = b[i] - U[i, j]*b[j]
             end
         end
@@ -155,7 +155,7 @@ end
         end
         for j = min($WIDTH, n-$WD):-1:1
             b[j] = $op(b[j], U[j, j])
-            for i = max(1, j-$WIDTH - 1):j-1
+            for i = max(1, j-$WIDTH+1):j-1
                 b[i] = b[i] - U[i, j]*b[j]
             end
         end
