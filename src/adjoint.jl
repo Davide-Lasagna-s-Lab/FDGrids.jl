@@ -141,6 +141,74 @@ function LinearAlgebra.adjoint(D::DiffMatrix{T, WIDTH}) where {T, WIDTH}
 end
 
 """
+    adjoint(D::DiffMatrix{T, WIDTH}, w::AbstractVector{T}) -> AdjointDiffMatrix{T, WIDTH}
+
+Construct the adjoint of `D` under the weighted inner product `(u, v)_W = u'Wv`
+where `W = Diagonal(w)`. The result represents the operator
+
+    D⁺ = W⁻¹ D* W
+
+whose action on a vector `v` is `(1/w) .* (D* (w .* v))`.
+
+The weights are fused directly into the three precomputed coefficient matrices at
+construction time, so each `mul!(y, Dp, x)` call has the same cost as an unweighted
+`mul!(y, adjoint(D), x)` — no additional scaling passes are needed.
+
+The fused coefficient for output `j` and contributing row `i` is:
+
+    coeff_fused[i, j] = D[i, j] * w[i] / w[j]
+
+# Arguments
+- `D`: Forward differentiation matrix.
+- `w`: Weight vector of length `size(D, 1)`. All entries must be non-zero.
+
+# Returns
+An `AdjointDiffMatrix` with scaled coefficient matrices.
+
+# See also
+`adjoint(D::DiffMatrix)` for the unweighted transpose.
+"""
+function LinearAlgebra.adjoint(D::DiffMatrix{T, WIDTH}, w::AbstractVector{T}) where {T, WIDTH}
+    size(D, 1) > 2 * WIDTH ||
+        throw(ArgumentError("can only take weighted adjoint if size(D, 1) > 2*WIDTH"))
+    length(w) == size(D, 1) ||
+        throw(ArgumentError("length(w) must equal size(D, 1)"))
+
+    HWIDTH = WIDTH >> 1
+    N      = size(D, 1)
+
+    # build the base transposed coefficient matrices, then scale in-place
+    head = _build_head_coeffs_T(D)
+    body = _build_body_coeffs_T(D)
+    tail = _build_tail_coeffs_T(D)
+
+    # head: head[i, j] *= w[i] / w[j]  for i = 1:j+HWIDTH, j = 1:WIDTH
+    for j in 1:WIDTH
+        for i in 1:(j + HWIDTH)
+            head[i, j] *= w[i] / w[j]
+        end
+    end
+
+    # body: body[k, jb] *= w[j-HWIDTH+k-1] / w[j]  where j = jb+WIDTH
+    for jb in 1:size(body, 2)
+        j = jb + WIDTH
+        for k in 1:WIDTH
+            body[k, jb] *= w[j - HWIDTH + k - 1] / w[j]
+        end
+    end
+
+    # tail: tail[k, jt] *= w[N-WIDTH-HWIDTH+k] / w[j]  where j = N-WIDTH+jt
+    for jt in 1:WIDTH
+        j = N - WIDTH + jt
+        for k in jt:(WIDTH + HWIDTH)
+            tail[k, jt] *= w[N - WIDTH - HWIDTH + k] / w[j]
+        end
+    end
+
+    return AdjointDiffMatrix(D, head, body, tail)
+end
+
+"""
     adjoint(D::AdjointDiffMatrix) -> DiffMatrix
 
 Return the parent forward matrix. Adjoint of adjoint is the identity; no copy
@@ -188,76 +256,3 @@ Expand the transposed representation into a dense `N×N` matrix,
 equal to `transpose(full(A.parent))`.
 """
 full(A::AdjointDiffMatrix) = collect(transpose(full(A.parent)))
-
-
-# ================================================================================
-# Weighted adjoint:  D⁺ = W⁻¹ D* W
-# ================================================================================
-
-"""
-    weighted_adjoint(D::DiffMatrix{T, WIDTH}, w::AbstractVector{T}) -> AdjointDiffMatrix{T, WIDTH}
-
-Construct the adjoint of `D` under the weighted inner product `(u, v)_W = u'Wv`
-where `W = Diagonal(w)`. The result represents the operator
-
-    D⁺ = W⁻¹ D* W
-
-whose action on a vector `v` is `(1/w) .* (D* (w .* v))`.
-
-The weights are fused directly into the three precomputed coefficient matrices at
-construction time, so each `mul!(y, Dp, x)` call has the same cost as an unweighted
-`mul!(y, adjoint(D), x)` — no additional scaling passes are needed.
-
-The fused coefficient for output `j` and contributing row `i` is:
-
-    coeff_fused[i, j] = D[i, j] * w[i] / w[j]
-
-# Arguments
-- `D`: Forward differentiation matrix.
-- `w`: Weight vector of length `size(D, 1)`. All entries must be non-zero.
-
-# Returns
-An `AdjointDiffMatrix` with scaled coefficient matrices.
-
-# See also
-`adjoint(D::DiffMatrix)` for the unweighted transpose.
-"""
-function weighted_adjoint(D::DiffMatrix{T, WIDTH}, w::AbstractVector{T}) where {T, WIDTH}
-    size(D, 1) > 2 * WIDTH ||
-        throw(ArgumentError("can only take weighted adjoint if size(D, 1) > 2*WIDTH"))
-    length(w) == size(D, 1) ||
-        throw(ArgumentError("length(w) must equal size(D, 1)"))
-
-    HWIDTH = WIDTH >> 1
-    N      = size(D, 1)
-
-    # build the base transposed coefficient matrices, then scale in-place
-    head = _build_head_coeffs_T(D)
-    body = _build_body_coeffs_T(D)
-    tail = _build_tail_coeffs_T(D)
-
-    # head: head[i, j] *= w[i] / w[j]  for i = 1:j+HWIDTH, j = 1:WIDTH
-    for j in 1:WIDTH
-        for i in 1:(j + HWIDTH)
-            head[i, j] *= w[i] / w[j]
-        end
-    end
-
-    # body: body[k, jb] *= w[j-HWIDTH+k-1] / w[j]  where j = jb+WIDTH
-    for jb in 1:size(body, 2)
-        j = jb + WIDTH
-        for k in 1:WIDTH
-            body[k, jb] *= w[j - HWIDTH + k - 1] / w[j]
-        end
-    end
-
-    # tail: tail[k, jt] *= w[N-WIDTH-HWIDTH+k] / w[j]  where j = N-WIDTH+jt
-    for jt in 1:WIDTH
-        j = N - WIDTH + jt
-        for k in jt:(WIDTH + HWIDTH)
-            tail[k, jt] *= w[N - WIDTH - HWIDTH + k] / w[j]
-        end
-    end
-
-    return AdjointDiffMatrix(D, head, body, tail)
-end
