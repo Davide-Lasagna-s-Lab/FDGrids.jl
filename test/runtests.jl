@@ -2,7 +2,108 @@ using LinearAlgebra
 using FDGrids
 using Test
 
-@testset "test quadrature                           " begin
+include("test_adjoint.jl")
+
+@testset "test grid API                             " begin
+    M = 64
+    l = -1.0
+    h =  2.0
+    I_exp = exp(h) - exp(l)   # ∫_l^h exp(x) dx, used throughout
+
+    # ---- return type and named tuple fields ----
+    for dist in (MappedGrid(0.5), MappedGrid(0.5, 2), UniformGrid(), GaussLobattoGrid())
+        result = grid(M, l, h, dist)
+        @test result isa NamedTuple
+        @test haskey(result, :xs)
+        @test haskey(result, :ws)
+        @test length(result.xs) == M
+        @test length(result.ws) == M
+    end
+
+    # ---- points are sorted ascending and within [l, h] ----
+    for dist in (MappedGrid(0.5), UniformGrid(), GaussLobattoGrid())
+        xs, _ = grid(M, l, h, dist)
+        @test issorted(xs)
+        @test xs[1]   ≈ l
+        @test xs[end] ≈ h
+    end
+
+    # ---- weights sum to interval length (∫_l^h 1 dx = h - l) ----
+    for dist in (MappedGrid(0.5), MappedGrid(0.5, 2), UniformGrid(), GaussLobattoGrid())
+        _, ws = grid(M, l, h, dist)
+        @test sum(ws) ≈ h - l  atol=1e-12
+    end
+
+    # ---- UniformGrid: weights always strictly positive ----
+    _, ws = grid(M, l, h, UniformGrid())
+    @test all(ws .> 0)
+
+    # ---- GaussLobattoGrid: weights always strictly positive ----
+    _, ws = grid(M, l, h, GaussLobattoGrid())
+    @test all(ws .> 0)
+
+    # ---- UniformGrid: correct trapezoidal structure ----
+    # interior weights equal h_step, endpoints equal h_step/2
+    M2    = 11
+    xs, ws = grid(M2, 0.0, 1.0, UniformGrid())
+    h_step = 1.0 / (M2 - 1)
+    @test ws[1]   ≈ h_step / 2
+    @test ws[end] ≈ h_step / 2
+    @test all(ws[2:end-1] .≈ h_step)
+
+    # ---- GaussLobattoGrid: Chebyshev-Lobatto nodes on [-1, 1] ----
+    # nodes should match cos formula exactly
+    xs, _ = grid(M, -1.0, 1.0, GaussLobattoGrid())
+    expected = [cos(π * (M - 1 - j) / (M - 1)) for j in 0:M-1]
+    @test xs ≈ expected  atol=1e-14
+
+    # ---- MappedGrid order parameter ----
+    # order=1 (trapezoidal) should be less accurate than order=4 for exp
+    xs1, ws1 = grid(M, l, h, MappedGrid(0.5, 1))
+    xs4, ws4 = grid(M, l, h, MappedGrid(0.5, 4))
+    err1 = abs(sum(exp.(xs1) .* ws1) - I_exp)
+    err4 = abs(sum(exp.(xs4) .* ws4) - I_exp)
+    @test err4 < err1
+
+    # ---- integration accuracy ----
+    # UniformGrid: trapezoidal is O(h²), so error ∝ 1/M²
+    # doubling M should reduce error by ~4
+    _, ws_32  = grid(32,  l, h, UniformGrid())
+    xs_32, _  = grid(32,  l, h, UniformGrid())
+    _, ws_64  = grid(64,  l, h, UniformGrid())
+    xs_64, _  = grid(64,  l, h, UniformGrid())
+    err_32 = abs(sum(exp.(xs_32) .* ws_32) - I_exp)
+    err_64 = abs(sum(exp.(xs_64) .* ws_64) - I_exp)
+    @test err_32 / err_64 > 3.5   # close to 4× improvement
+
+    # GaussLobattoGrid: spectral accuracy — 64 points should be essentially exact
+    xs_gl, ws_gl = grid(64, l, h, GaussLobattoGrid())
+    @test abs(sum(exp.(xs_gl) .* ws_gl) - I_exp) < 1e-14
+
+    # GaussLobattoGrid: exact for polynomials of degree ≤ 2M-3
+    # test with a degree-5 polynomial where M=8 is exact (2*8-3 = 13 ≥ 5)
+    xs_gl, ws_gl = grid(8, -1.0, 1.0, GaussLobattoGrid())
+    f5(x) = x^5 - 3x^3 + x    # exact integral on [-1,1] = 0
+    @test abs(sum(f5.(xs_gl) .* ws_gl)) < 1e-14
+
+    # ---- error handling ----
+    @test_throws ArgumentError grid(1, l, h, GaussLobattoGrid())   # M < 2
+    @test_throws ArgumentError grid(M, h, l, GaussLobattoGrid())   # l > h
+    @test_throws ArgumentError MappedGrid(0.0)                     # α = 0
+    @test_throws ArgumentError MappedGrid(1.5)                     # α > 1
+    @test_throws ArgumentError MappedGrid(0.5, 0)                  # order < 1
+
+    # ---- backward compatibility: gridpoints still works ----
+    xs_new = gridpoints(M, l, h, 0.5)
+    xs_old, _ = grid(M, l, h, MappedGrid(0.5))
+    @test xs_new ≈ xs_old
+
+    xs_new2 = gridpoints(M, l, h, GaussLobattoGrid())
+    xs_old2, _ = grid(M, l, h, GaussLobattoGrid())
+    @test xs_new2 ≈ xs_old2
+end
+
+@testset "test quadrature (old interface)           " begin
 
     # quadrature
     xs = range(-2, stop=2, length=121)
@@ -33,7 +134,6 @@ using Test
     @test sum((x->x^2).(xs) .* _quadweights(xs)) ≈ 2/3
     @test sum((x->x  ).(xs) .* _quadweights(xs)) ≈ 0 atol=1e-15
     @test sum((x->1  ).(xs) .* _quadweights(xs)) ≈ 2
-
 end
 
 @testset "test grid                                 " begin
@@ -126,7 +226,7 @@ end
     for width = (3, 5, 7)
         D = DiffMatrix(gridpoints(50, -1, 1), width, 1)
         Df = FDGrids.full(D)
-        
+
         u = rand(50)
         @test norm(Df * u .- D * u)/50 < 1e-14
 
@@ -152,6 +252,24 @@ end
                 @test mul!(similar(fs), D, fs)[i] == mul!(D, fs, i)
             end
         end
+    end
+end
+
+@testset "test full.                                " begin
+    M = 32
+    width = 3
+
+    # get grid
+    xs = gridpoints(M, -1, 1, 0.5)
+
+    # make grid from -1 to 1 using α = 0.5
+    D1 = DiffMatrix(xs, width, 1)
+
+    # get full matrix
+    D1_full = full(D1)
+
+    for i = 1:M, j = 1:M
+        @test D1_full[i, j] == D1[i, j]
     end
 end
 
@@ -418,9 +536,9 @@ end
             # helper: index for center/boundary along the differentiated axis,
             # keeping the other indices fixed to 1
             idx_on_axis(DIM, pos) = DIM == 1 ? CartesianIndex(pos, 1, 1, 1) :
-                                  DIM == 2 ? CartesianIndex(1, pos, 1, 1) :
-                                  DIM == 3 ? CartesianIndex(1, 1, pos, 1) :
-                                             CartesianIndex(1, 1, 1, pos)
+                                    DIM == 2 ? CartesianIndex(1, pos, 1, 1) :
+                                    DIM == 3 ? CartesianIndex(1, 1, pos, 1) :
+                                               CartesianIndex(1, 1, 1, pos)
 
             for DIM in 1:4
                 fs_view    = view_for_dim(fs, DIM)
@@ -493,11 +611,17 @@ end
             # factorise diffmatrix without inverting the diagonal element
             luD2 = lu!(D)
 
-            # since they are the same, the factorisation does not spoil 
-            # the structure of the differentiation matrices and we do not 
+            # since they are the same, the factorisation does not spoil
+            # the structure of the differentiation matrices and we do not
             # require additional storage
             @test norm(luD1 - full(luD2)) < 1e-8
             # @printf "%04d %04d %.5e\n" M width norm(luD1 - full(luD2))/M
+
+            # solve with OPTIMISE=false and compare to the full LU reference
+            b = randn(M)
+            x_banded = ldiv!(luD2, copy(b))
+            x_full   = ldiv!(luDfull, copy(b))
+            @test norm(x_banded - x_full)/M < 1e-12
         end
     end
 end

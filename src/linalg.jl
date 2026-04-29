@@ -124,7 +124,7 @@ LinearAlgebra.ldiv!(A::DiffMatrix{T, WIDTH}, b::AbstractVector) where {T, WIDTH}
                 b[j+i_] = muladd(L.coeffs[$WD + 1 - i_, i_+j], -b[j], b[j+i_])
             end
         end
-        for j = (n-$WIDTH+1):n
+        for j = max(n-$WIDTH+1, $WD):n
             for i = j+1:min(j+$WIDTH - 1, n)
                 b[i] = b[i] - L[i, j]*b[j]
             end
@@ -142,20 +142,20 @@ end
     n = size(U, 1)
     @inbounds begin
         for j = n:-1:(n-$WD+1)
-            b[j] *= U[j, j]
-            for i = max(1, j-$WIDTH - 1):j-1
+            b[j] = $op(b[j], U[j, j])
+            for i = max(1, j-$WIDTH+1):j-1
                 b[i] = b[i] - U[i, j]*b[j]
             end
         end
         for j = (n-$WD):-1:($WIDTH+1)
-            b[j] *= U.coeffs[$WD+1, j] 
+            b[j] = $op(b[j], U.coeffs[$WD+1, j])
             Base.Cartesian.@nexprs $WD i_ -> begin
                 b[j-i_] = muladd(U.coeffs[$WD + 1 + i_, j - i_], -b[j], b[j-i_])
             end
         end
-        for j = $WIDTH:-1:1
+        for j = min($WIDTH, n-$WD):-1:1
             b[j] = $op(b[j], U[j, j])
-            for i = max(1, j-$WIDTH - 1):j-1
+            for i = max(1, j-$WIDTH+1):j-1
                 b[i] = b[i] - U[i, j]*b[j]
             end
         end
