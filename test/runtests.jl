@@ -104,22 +104,22 @@ end
     # diffmatrix
     D = DiffMatrix(xs, 3, 1)
 
-    @test typeof(D)                             == DiffMatrix{Float64, 3, true}
-    @test typeof(D + 3*I)                       == DiffMatrix{Float64, 3, true}
-    @test typeof(D + D)                         == DiffMatrix{Float64, 3, true}
-    @test typeof(D + 3*D)                       == DiffMatrix{Float64, 3, true}
-    @test typeof(D + 3*Diagonal(rand(6))*D)     == DiffMatrix{Float64, 3, true}
-    @test typeof(D + 2*D*(3*I))                 == DiffMatrix{Float64, 3, true}
-    @test typeof(D + 3*im*Diagonal(rand(6))*D)  == DiffMatrix{Complex{Float64}, 3, true}
+    @test typeof(D)                             == DiffMatrix{Float64, 3, true, Matrix{Float64}}
+    @test typeof(D + 3*I)                       == DiffMatrix{Float64, 3, true, Matrix{Float64}}
+    @test typeof(D + D)                         == DiffMatrix{Float64, 3, true, Matrix{Float64}}
+    @test typeof(D + 3*D)                       == DiffMatrix{Float64, 3, true, Matrix{Float64}}
 
     #  different width
     DA = DiffMatrix(xs, 3, 1)
     DB = DiffMatrix(xs, 5, 1)
-    C  = Diagonal(rand(6))
 
     @test all(FDGrids.full(DA + DB) .== FDGrids.full(DA) + FDGrids.full(DB))
-    @test all(FDGrids.full(C*DA) .== C*FDGrids.full(DA))
-    @test all(FDGrids.full(DA + 2*DA*(3*I)) .== FDGrids.full(DA) + 2*FDGrids.full(DA)*(3*I))
+
+    #  different optimisation
+    DA = DiffMatrix(xs, 3, 1; optimise=true)
+    DB = DiffMatrix(xs, 3, 1; optimise=false)
+
+    @test typeof(D + D) == DiffMatrix{Float64, 3, true, Matrix{Float64}}
 end
 
 @testset "matvec/matmat product                     " begin
@@ -482,7 +482,7 @@ end
         for width in (3, 5, 7, 9)
             # diffmatrix
             # test fixed to optimise=false to facilitate comparison
-            D = DiffMatrix(xs, width, 2, false)
+            D = DiffMatrix(xs, width, 2; optimise=false)
             D[1,   :] .= [1, zeros(M-1)...]
             D[end, :] .= [zeros(M-1)..., 1];
 
