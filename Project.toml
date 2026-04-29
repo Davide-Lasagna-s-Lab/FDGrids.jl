@@ -1,10 +1,14 @@
 name = "FDGrids"
 uuid = "28eb41cd-435a-4ede-8bdb-f2685fc03e8c"
-authors = ["Davide Lasagna <davide.lasagna@soton.ac.uk>"]
 version = "0.1.5"
+authors = ["Davide Lasagna <davide.lasagna@soton.ac.uk>"]
 
 [deps]
+BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+
+[compat]
+BenchmarkTools = "1.8.0"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
