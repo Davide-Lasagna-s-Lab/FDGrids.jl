@@ -611,11 +611,17 @@ end
             # factorise diffmatrix without inverting the diagonal element
             luD2 = lu!(D)
 
-            # since they are the same, the factorisation does not spoil 
-            # the structure of the differentiation matrices and we do not 
+            # since they are the same, the factorisation does not spoil
+            # the structure of the differentiation matrices and we do not
             # require additional storage
             @test norm(luD1 - full(luD2)) < 1e-8
             # @printf "%04d %04d %.5e\n" M width norm(luD1 - full(luD2))/M
+
+            # solve with OPTIMISE=false and compare to the full LU reference
+            b = randn(M)
+            x_banded = ldiv!(luD2, copy(b))
+            x_full   = ldiv!(luDfull, copy(b))
+            @test norm(x_banded - x_full)/M < 1e-12
         end
     end
 end
