@@ -108,7 +108,7 @@ end
         D  = DiffMatrix(xs, width, 1)
         w  = 1.0 .+ rand(M)   # strictly positive weights
 
-        Dp = weighted_adjoint(D, w)
+        Dp = adjoint(D, w)
 
         # Dp should be an AdjointDiffMatrix
         @test Dp isa AdjointDiffMatrix{Float64, width}
@@ -124,20 +124,20 @@ end
 
         # unweighted adjoint is the w=1 special case
         At   = adjoint(D)
-        Dp1  = weighted_adjoint(D, ones(M))
+        Dp1  = adjoint(D, ones(M))
         y_At  = similar(x)
         y_Dp1 = similar(x)
         mul!(y_At,  At,  x)
         mul!(y_Dp1, Dp1, x)
         @test y_At ≈ y_Dp1
 
-        # weighted_adjoint throws when w has the wrong length
-        @test_throws ArgumentError weighted_adjoint(D, ones(M + 1))
+        # weighted adjoint throws when w has the wrong length
+        @test_throws ArgumentError adjoint(D, ones(M + 1))
 
-        # weighted_adjoint throws when size ≤ 2*WIDTH (no body)
+        # weighted adjoint throws when size ≤ 2*WIDTH (no body)
         xs_bad = gridpoints(2 * width, -1, 1, 0.5)
         D_bad  = DiffMatrix(xs_bad, width, 1)
-        @test_throws ArgumentError weighted_adjoint(D_bad, ones(2 * width))
+        @test_throws ArgumentError adjoint(D_bad, ones(2 * width))
     end
 end
 
