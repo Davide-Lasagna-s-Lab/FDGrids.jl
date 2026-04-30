@@ -21,24 +21,23 @@ end
 # ================================================================================
 
 """
-    _make_kernel_fixed(DIM, WIDTH, N, coeff_field, base_expr) -> Expr
+    _make_kernel_fixed(DIM, WIDTH, N, base_expr) -> Expr
 
 Emit a stencil kernel that reads exactly WIDTH coefficients from
-`A.<coeff_field>[ptr..]` and WIDTH x-values starting at `x[base_expr..]`.
+`A.coeffs[ptr..]` and WIDTH x-values starting at `x[base_expr..]`.
 The dot-product is fully unrolled at code-generation time.
 
 Covers all forward regions and the adjoint body:
-  - forward head:    coeff_field=:coeffs,   base_expr=1
-  - forward body:    coeff_field=:coeffs,   base_expr=:(index - HWIDTH)
-  - forward tail:    coeff_field=:coeffs,   base_expr=:(size(x,DIM) - WIDTH + 1)
-  - adjoint body:    coeff_field=:coeffs_T, base_expr=:(index - HWIDTH)
+  - forward head:  base_expr=1
+  - forward/adjoint body: base_expr=:(index - HWIDTH)
+  - forward tail:  base_expr=:(size(x,DIM) - WIDTH + 1)
 """
-function _make_kernel_fixed(DIM, WIDTH, N, coeff_field::Symbol, base_expr)
+function _make_kernel_fixed(DIM, WIDTH, N, base_expr)
     index = Symbol(:i, DIM)
     return quote
-        s = A.$coeff_field[ptr] * $(_make_ref(:x, base_expr, DIM, N))
+        s = A.coeffs[ptr] * $(_make_ref(:x, base_expr, DIM, N))
         Base.Cartesian.@nexprs $(WIDTH - 1) p -> begin
-            s += A.$coeff_field[ptr + p] * $(_make_ref(:x, :(($base_expr) + p), DIM, N))
+            s += A.coeffs[ptr + p] * $(_make_ref(:x, :(($base_expr) + p), DIM, N))
         end
         $(_make_ref(:y, index, DIM, N)) = s
     end
@@ -48,10 +47,10 @@ end
     _make_kernel_variable(DIM, WIDTH, N, nrows_expr, base_expr) -> Expr
 
 Emit a stencil kernel that reads a variable number of terms from
-`A.coeffs_T[ptr..]` and `x[base_expr + _k - 1]` for `_k in 1:nrows_j`.
+`A.coeffs[ptr..]` and `x[base_expr + _k - 1]` for `_k in 1:nrows_j`.
 
 Used for adjoint boundary outputs whose stencil row-count varies:
-  - adjoint head: nrows_expr=:(index + HWIDTH),              base_expr=1
+  - adjoint head: nrows_expr=:(index + HWIDTH),                   base_expr=1
   - adjoint tail: nrows_expr=:(size(x,DIM) - index + HWIDTH + 1), base_expr=:(index - HWIDTH)
 """
 function _make_kernel_variable(DIM, WIDTH, N, nrows_expr, base_expr)
@@ -60,7 +59,7 @@ function _make_kernel_variable(DIM, WIDTH, N, nrows_expr, base_expr)
         nrows_j = $nrows_expr
         s = zero(eltype(y))
         for _k in 1:nrows_j
-            s += A.coeffs_T[ptr + _k - 1] * $(_make_ref(:x, :(($base_expr) + _k - 1), DIM, N))
+            s += A.coeffs[ptr + _k - 1] * $(_make_ref(:x, :(($base_expr) + _k - 1), DIM, N))
         end
         $(_make_ref(:y, index, DIM, N)) = s
     end
@@ -94,9 +93,9 @@ function _make_loop_expr_forward(DIM, N, WIDTH)
         ptr_start  = (global_idx + _f_local - 2) * $WIDTH + 1
     end
 
-    head_kernel = _make_kernel_fixed(DIM, WIDTH, N, :coeffs, 1)
-    body_kernel = _make_kernel_fixed(DIM, WIDTH, N, :coeffs, :($index - $HWIDTH))
-    tail_kernel = _make_kernel_fixed(DIM, WIDTH, N, :coeffs, :(size(x, $DIM) - $WIDTH + 1))
+    head_kernel = _make_kernel_fixed(DIM, WIDTH, N, 1)
+    body_kernel = _make_kernel_fixed(DIM, WIDTH, N, :($index - $HWIDTH))
+    tail_kernel = _make_kernel_fixed(DIM, WIDTH, N, :(size(x, $DIM) - $WIDTH + 1))
 
     inner_head = head_kernel
     inner_body = body_kernel
@@ -150,7 +149,7 @@ end
 """
     _ptr_for_j(j, N, ::Val{WIDTH}) -> Int
 
-Return the 1-based index into `coeffs_T` of the first coefficient for output `j`.
+Return the 1-based index into `A.coeffs` of the first coefficient for output `j`.
 
   - head  j ≤ WIDTH:           1 + HWIDTH*(j-1) + (j-1)*j÷2
   - body  WIDTH < j ≤ N-WIDTH: (j-1)*WIDTH + 1
@@ -174,7 +173,7 @@ end
     _make_loop_expr_adjoint(DIM, N, WIDTH) -> Expr
 
 Construct the full nested loop for the adjoint operator along dimension `DIM`.
-Uses a running `ptr` into `A.coeffs_T`. Boundary regions span `WIDTH` outputs on
+Uses a running `ptr` into `A.coeffs`. Boundary regions span `WIDTH` outputs on
 each side. Each fiber resets `ptr = ptr_start` computed via `_ptr_for_j`.
 """
 function _make_loop_expr_adjoint(DIM, N, WIDTH)
@@ -194,7 +193,7 @@ function _make_loop_expr_adjoint(DIM, N, WIDTH)
     end
 
     head_kernel = _make_kernel_variable(DIM, WIDTH, N, :($index + $HWIDTH), 1)
-    body_kernel = _make_kernel_fixed(DIM, WIDTH, N, :coeffs_T, :($index - $HWIDTH))
+    body_kernel = _make_kernel_fixed(DIM, WIDTH, N, :($index - $HWIDTH))
     tail_kernel = _make_kernel_variable(DIM, WIDTH, N,
                       :(size(x, $DIM) - $index + $HWIDTH + 1), :($index - $HWIDTH))
 

@@ -5,8 +5,8 @@ Transposed finite-difference differentiation matrix D*, constructed from a
 `DiffMatrix` by `adjoint(D)`.
 
 Coefficients for the transpose operator are stored in a single flat vector
-`coeffs_T` of length `N*WIDTH` — identical total storage to the forward matrix.
-For each output j (1..N), the contributing input rows are stored consecutively:
+`coeffs` of length `N*WIDTH`. For each output j (1..N), the contributing
+input rows are stored consecutively:
 
   - **head** j ∈ 1:WIDTH        → j+HWIDTH entries, inputs 1..j+HWIDTH
   - **body** j ∈ WIDTH+1:N-WIDTH → WIDTH entries,  inputs j-HWIDTH..j+HWIDTH
@@ -15,16 +15,16 @@ For each output j (1..N), the contributing input rows are stored consecutively:
 The pointer for any output j is given in closed form by `_ptr_for_j`.
 """
 struct AdjointDiffMatrix{T, WIDTH} <: AbstractMatrix{T}
-    parent   :: DiffMatrix{T, WIDTH}
-    coeffs_T :: Vector{T}            # length N*WIDTH, output-major order
+    parent :: DiffMatrix{T, WIDTH}
+    coeffs :: Vector{T}            # length N*WIDTH, output-major order
 end
 
 
 # ================================================================================
-# Internal coefficient builders
+# Internal coefficient builder
 # ================================================================================
 
-function _build_coeffs_T(D::DiffMatrix{T, WIDTH}, w::AbstractVector{T}) where {T, WIDTH}
+function _build_adjoint_coeffs(D::DiffMatrix{T, WIDTH}, w::AbstractVector{T}) where {T, WIDTH}
     HWIDTH = WIDTH >> 1
     N      = size(D, 1)
     out    = Vector{T}(undef, N * WIDTH)
@@ -60,7 +60,7 @@ end
 
 Construct the transposed differentiation matrix D*.
 
-Builds `coeffs_T` (length N*WIDTH) once at O(N*WIDTH) cost; all subsequent
+Builds `coeffs` (length N*WIDTH) once at O(N*WIDTH) cost; all subsequent
 `mul!` calls are allocation-free. Requires `size(D,1) > 2*WIDTH`.
 """
 function LinearAlgebra.adjoint(D::DiffMatrix{T, WIDTH}) where {T, WIDTH}
@@ -73,7 +73,7 @@ end
 Construct the adjoint of `D` under the weighted inner product `(u,v)_W = u'Wv`
 where `W = Diagonal(w)`. The result represents D⁺ = W⁻¹ D* W.
 
-Weights are fused into `coeffs_T` at construction time:
+Weights are fused into `coeffs` at construction time:
 `coeff[i,j] = D[i,j] * w[i] / w[j]`. Requires `size(D,1) > 2*WIDTH`.
 """
 function LinearAlgebra.adjoint(D::DiffMatrix{T, WIDTH}, w::AbstractVector{T}) where {T, WIDTH}
@@ -81,7 +81,7 @@ function LinearAlgebra.adjoint(D::DiffMatrix{T, WIDTH}, w::AbstractVector{T}) wh
         throw(ArgumentError("can only take weighted adjoint if size(D,1) > 2*WIDTH"))
     length(w) == size(D, 1) ||
         throw(ArgumentError("length(w) must equal size(D,1)"))
-    return AdjointDiffMatrix(D, _build_coeffs_T(D, w))
+    return AdjointDiffMatrix(D, _build_adjoint_coeffs(D, w))
 end
 
 """
@@ -103,7 +103,7 @@ Base.getindex(d::AdjointDiffMatrix, i::Int, j::Int) = d.parent[j, i]
 function Base.setindex!(::AdjointDiffMatrix, v, i::Int, j::Int)
     throw(ArgumentError(
         "setindex! is not supported on AdjointDiffMatrix: modifying it in-place " *
-        "would leave coeffs_T stale. Modify the parent and reconstruct via adjoint(d.parent)."))
+        "would leave coeffs stale. Modify the parent and reconstruct via adjoint(d.parent)."))
 end
 
 """
