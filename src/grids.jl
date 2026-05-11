@@ -203,9 +203,13 @@ end
 Composite Newton-Cotes quadrature weights for the node vector `xs` using panels
 of `order+1` points. Delegates to `_quadweights_panel` on each panel.
 
+The points in `xs` should be sorted in ascending order.
+
 Weights may be negative for high `order` or non-uniform nodes.
 """
 function _newton_cotes_weights(xs::AbstractVector, order::Int)
+    issorted(xs) || throw(ArgumentError("Newton-Cotes weights require sorted grid points"))
+
     N  = length(xs)
     ws = zeros(N)
     ii = 1
