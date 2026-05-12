@@ -40,7 +40,7 @@ Typical values: `1` (trapezoidal), `2` (Simpson), `3`, `4`.
 struct MappedGrid <: AbstractGridDistribution
     α    ::Float64
     order::Int
-    function MappedGrid(α::Real = 0.5, order::Int = 4)
+    function MappedGrid(α::Real = 0.5, order::Int = 2)
         0 < α ≤ 1 || throw(ArgumentError("α must ∈ (0, 1]"))
         order ≥ 1  || throw(ArgumentError("order must be ≥ 1"))
         return new(Float64(α), order)
