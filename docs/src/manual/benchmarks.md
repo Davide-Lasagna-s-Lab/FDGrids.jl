@@ -13,6 +13,7 @@ julia --project=benchmarks -e '
 
 julia --project=benchmarks benchmarks/linsolve.jl
 julia --project=benchmarks benchmarks/matmul.jl
+julia --project=benchmarks benchmarks/adjoint.jl
 ```
 
 The figures embed the CPU model and available RAM of the machine they were run on.
@@ -57,5 +58,22 @@ stencil width; line style encodes the differentiation direction.
 ```@raw html
 <img src="../../assets/benchmarks/matmul.svg"
      alt="mul! throughput"
+     style="width:100%; max-width:1100px;" />
+```
+
+## Forward vs adjoint
+
+Measures the speedup of `mul!(y, adjoint(D), x, Val(dim))` relative to the
+forward `mul!(y, D, x, Val(dim))`, defined as **forward time / adjoint time**.
+A value above 1 means the adjoint is faster; below 1 it carries overhead.
+A dashed line at 1 marks parity.
+
+The same array dimensions, stencil widths, and size ranges as the matrix–vector
+product benchmark are used, with the same randomised 10-pass median methodology.
+Colour encodes stencil width; line style encodes differentiation direction.
+
+```@raw html
+<img src="../../assets/benchmarks/adjoint.svg"
+     alt="Adjoint speedup over forward"
      style="width:100%; max-width:1100px;" />
 ```
