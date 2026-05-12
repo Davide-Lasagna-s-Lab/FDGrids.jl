@@ -167,7 +167,7 @@ D  = DiffMatrix(xs, 3, 1)
 M  = full(D)
 ```
 """
-full(A::DiffMatrix{T}) where {T} = [A[i, j] for i in 1:size(A, 1), j in 1:size(A, 2)]
+full(A::DiffMatrix) = [A[i, j] for i in 1:size(A, 1), j in 1:size(A, 2)]
 
 
 # ================================================================================
