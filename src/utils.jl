@@ -1,9 +1,32 @@
 """
-    Algorithm to obtain finite difference weights based
-    on Lagrange interpolation. Adapted from nscouette
-    code (Marc Avila, ZARM, Bremen University) and Bengt
-    Fornberg's "A practical guide to PseudoSpectral methods"
-    Appendix C (subroutine WEIGHTS1).
+    get_weights(ξ, x, m) -> Matrix
+
+Compute finite-difference interpolation and differentiation weights at `ξ`
+using the nodes in `x`.
+
+The returned matrix has size `(length(x), m+1)`. Column `k+1` contains weights
+for the `k`-th derivative, so
+
+```julia
+dot(get_weights(ξ, x, m)[:, k+1], f.(x))
+```
+
+approximates `f^(k)(ξ)`. Column `1` is therefore the interpolation rule.
+
+The nodes in `x` must be distinct. They may be non-uniform and need not be
+centered around `ξ`.
+
+The implementation is Fornberg's recursive algorithm for finite-difference
+weights on arbitrarily spaced nodes, adapted from the `nscouette` code
+(Marc Avila, ZARM, Bremen University) and Appendix C of Bengt Fornberg's
+*A Practical Guide to Pseudospectral Methods*.
+
+# Examples
+```julia
+x = [-1.0, 0.0, 1.0]
+c = get_weights(0.0, x, 2)
+c[:, 2]  # first-derivative weights
+```
 """
 function get_weights(ξ::Real,
                      x::AbstractVector{<:Real},
@@ -41,6 +64,25 @@ function get_weights(ξ::Real,
     return coeffs
 end
 
+"""
+    get_coeffs(xs, width, order) -> Matrix
+
+Compute the compact row-wise coefficients for a `DiffMatrix`.
+
+`xs` are the grid points, `width` is the odd stencil width, and `order` is the
+derivative order. The result has size `(width, length(xs))`; column `i` contains
+the finite-difference weights for the derivative at `xs[i]`.
+
+Interior points use centered stencils. Boundary points use the nearest valid
+one-sided stencil of the same width, so the storage layout is uniform across all
+rows of the eventual `DiffMatrix`.
+
+# Examples
+```julia
+xs = range(-1, 1; length = 8)
+C  = get_coeffs(xs, 5, 1)
+```
+"""
 function get_coeffs(xs::AbstractVector{<:Real}, width::Int, order::Int)
 
     # make sure we have an odd number of points
@@ -85,5 +127,9 @@ function get_coeffs(xs::AbstractVector{<:Real}, width::Int, order::Int)
     return coeffs
 end
 
-# Return the `i` canonical basis vector of R^p of type `T`
+"""
+    basis_vector(i, P, [T=Float64]) -> Vector{T}
+
+Return the `i`-th canonical basis vector of length `P` with element type `T`.
+"""
 basis_vector(i, P, ::Type{T}=Float64) where {T} = (out = zeros(T, P); out[i] = 1; out)

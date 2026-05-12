@@ -142,33 +142,6 @@ function _make_loop_expr_forward(DIM, N, WIDTH)
 end
 
 
-# ================================================================================
-# ADJOINT HELPER
-# ================================================================================
-
-"""
-    _ptr_for_j(j, N, ::Val{WIDTH}) -> Int
-
-Return the 1-based index into `A.coeffs` of the first coefficient for output `j`.
-
-  - head  j ≤ WIDTH:           1 + HWIDTH*(j-1) + (j-1)*j÷2
-  - body  WIDTH < j ≤ N-WIDTH: (j-1)*WIDTH + 1
-  - tail  j > N-WIDTH:         (N-WIDTH)*WIDTH + 1 + (WIDTH+HWIDTH+1)*(jt-1) - (jt-1)*jt÷2
-                                where jt = j-(N-WIDTH)
-"""
-function _ptr_for_j(j::Int, N::Int, ::Val{WIDTH}) where {WIDTH}
-    HWIDTH = WIDTH >> 1
-    if j ≤ WIDTH
-        return 1 + HWIDTH*(j - 1) + (j - 1)*j÷2
-    elseif j ≤ N - WIDTH
-        return (j - 1)*WIDTH + 1
-    else
-        jt = j - (N - WIDTH)
-        return (N - WIDTH)*WIDTH + 1 +
-               (WIDTH + HWIDTH + 1)*(jt - 1) - (jt - 1)*jt÷2
-    end
-end
-
 """
     _make_loop_expr_adjoint(DIM, N, WIDTH) -> Expr
 
@@ -253,6 +226,26 @@ end
 
 Apply the forward finite-difference operator `A` to `x` along dimension `DIM`,
 writing the result into `y`. Non-distributed entry point.
+
+For vectors, the default `DIM=1` applies the usual matrix-vector action. For
+higher-dimensional arrays, each one-dimensional fiber along `DIM` is
+differentiated independently.
+
+# Examples
+```julia
+using LinearAlgebra
+
+xs = range(-1, 1; length = 32)
+D  = DiffMatrix(xs, 5, 1)
+
+u  = sin.(xs)
+du = similar(u)
+mul!(du, D, u)
+
+A  = repeat(reshape(u, :, 1), 1, 4)
+dA = similar(A)
+mul!(dA, D, A, Val(1))
+```
 """
 function LinearAlgebra.mul!(y::AbstractArray{S, N},
                             A::DiffMatrix{T, WIDTH},
@@ -271,6 +264,9 @@ Distribution-aware backend for the forward operator. `@generated` for the concre
 
 - `global_idx`: global index of `local_rng[1]` in the row numbering of `A`.
 - `local_rng`: local portion of dimension `DIM` to process.
+
+This method is intended for domain-decomposed callers. Ordinary local arrays
+should use `mul!(y, A, x, Val(DIM))`.
 """
 @generated function LinearAlgebra.mul!(y::AbstractArray{T, N},
                                        A::DiffMatrix{TD, WIDTH},
@@ -311,6 +307,18 @@ end
 
 Apply the transposed finite-difference operator `A = D*` to `x` along dimension
 `DIM`, writing the result into `y`. Non-distributed entry point.
+
+# Examples
+```julia
+using LinearAlgebra
+
+xs = range(-1, 1; length = 32)
+D  = DiffMatrix(xs, 5, 1)
+Dt = adjoint(D)
+
+y = similar(collect(xs))
+mul!(y, Dt, cos.(xs))
+```
 """
 function LinearAlgebra.mul!(y::AbstractArray{S, N},
                             A::AdjointDiffMatrix{T, WIDTH},
@@ -329,6 +337,9 @@ Distribution-aware backend for the adjoint operator. `@generated` for the concre
 
 - `global_idx`: global index of `local_rng[1]`. Set to `1` for non-distributed calls.
 - `local_rng`: local portion of dimension `DIM` to process.
+
+This method is intended for distributed or slab-local application of an adjoint
+operator. Ordinary local arrays should use `mul!(y, A, x, Val(DIM))`.
 """
 @generated function LinearAlgebra.mul!(y::AbstractArray{T, N},
                                        A::AdjointDiffMatrix{TD, WIDTH},
@@ -369,6 +380,18 @@ end
 
 Evaluate row `i` of the forward operator `A` applied to `x`. The sum is unrolled
 at generation time.
+
+This is useful when only one differentiated value is needed. It does not mutate
+`A` or `x`.
+
+# Examples
+```julia
+using LinearAlgebra
+
+xs = range(-1, 1; length = 16)
+D  = DiffMatrix(xs, 5, 1)
+du_at_3 = mul!(D, sin.(xs), 3)
+```
 """
 @generated function LinearAlgebra.mul!(A::DiffMatrix{T, WIDTH},
                                        x::AbstractVector,

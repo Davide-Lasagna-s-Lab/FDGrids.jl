@@ -36,6 +36,12 @@ Mapped Chebyshev grid with clustering parameter `α ∈ (0,1]`. Nodes are placed
 `order` is the polynomial degree of the composite Newton-Cotes quadrature rule.
 Positive weights are not guaranteed for high `order` or strongly non-uniform nodes.
 Typical values: `1` (trapezoidal), `2` (Simpson), `3`, `4`.
+
+# Examples
+```julia
+g = grid(48, -1, 1, MappedGrid(0.5, 4))
+sum(exp.(g.xs) .* g.ws)
+```
 """
 struct MappedGrid <: AbstractGridDistribution
     α    ::Float64
@@ -53,6 +59,11 @@ end
 
 Equally-spaced grid. The associated quadrature is the composite trapezoidal rule,
 which always produces strictly positive weights.
+
+# Examples
+```julia
+g = grid(16, 0, 1, UniformGrid())
+```
 """
 struct UniformGrid <: AbstractGridDistribution end
 
@@ -70,10 +81,16 @@ The associated quadrature is **Clenshaw-Curtis**, which has strictly positive we
 and is spectrally accurate for smooth integrands.
 
 This is the recommended distribution when a positive-definite inner product is required
-(e.g. for `weighted_adjoint`). Fields with zero boundary conditions produce zero endpoint
+(e.g. for `adjoint(D, w)`). Fields with zero boundary conditions produce zero endpoint
 contributions regardless of the endpoint weights, so Gauss-Lobatto is equally suitable
 for zero-BC problems while supporting the standard BC-enforcement pattern of overwriting
 rows 1 and `M` of `D`.
+
+# Examples
+```julia
+g = grid(32, -1, 1, GaussLobattoGrid())
+D = DiffMatrix(g.xs, 5, 1)
+```
 """
 struct GaussLobattoGrid <: AbstractGridDistribution end
 
@@ -102,10 +119,10 @@ A named tuple `(xs = points, ws = weights)` where:
 
 # Examples
 ```julia
-xs, ws = grid(64, -1, 1, GaussLobattoGrid())  # Clenshaw-Curtis, always positive
-xs, ws = grid(64, -1, 1, UniformGrid())       # trapezoidal, always positive
-xs, ws = grid(64, -1, 1, MappedGrid(0.5, 2))  # Simpson composite, α=0.5
-xs, ws = grid(64, -1, 1, MappedGrid(0.5))     # Newton-Cotes order 4, α=0.5
+g = grid(64, -1, 1, GaussLobattoGrid())  # Clenshaw-Curtis, always positive
+sum(exp.(g.xs) .* g.ws)
+
+xs, ws = grid(64, -1, 1, UniformGrid())  # named tuples can be destructured
 ```
 """
 function grid(M::Int, l::Real = -1.0, h::Real = 1.0,
@@ -122,6 +139,14 @@ end
 
 # ---- MappedGrid ----
 
+"""
+    _grid(M, l, h, g::MappedGrid) -> (xs, ws)
+
+Internal implementation for `MappedGrid`.
+
+The nodes are generated in ascending order on `[l,h]` and weights are computed
+with composite Newton-Cotes panels of degree `g.order`.
+"""
 function _grid(M::Int, l::Float64, h::Float64, g::MappedGrid)
     j  = 0:M-1
     xs = asin.(-g.α .* cos.(π .* j ./ (M - 1))) ./ asin(g.α) .* (h - l) / 2 .+ (h + l) / 2
@@ -133,6 +158,14 @@ end
 
 # ---- UniformGrid ----
 
+"""
+    _grid(M, l, h, ::UniformGrid) -> (xs, ws)
+
+Internal implementation for equally spaced nodes on `[l,h]`.
+
+Weights are the composite trapezoidal rule: half weights at the endpoints and
+uniform full weights in the interior.
+"""
 function _grid(M::Int, l::Float64, h::Float64, ::UniformGrid)
     xs = collect(range(l, h; length = M))
     h_ = (h - l) / (M - 1)
@@ -145,6 +178,14 @@ end
 
 # ---- GaussLobattoGrid ----
 
+"""
+    _grid(M, l, h, ::GaussLobattoGrid) -> (xs, ws)
+
+Internal implementation for Chebyshev-Lobatto nodes on `[l,h]`.
+
+The nodes are ordered from left to right and paired with Clenshaw-Curtis
+quadrature weights from `_clenshaw_curtis_weights`.
+"""
 function _grid(M::Int, l::Float64, h::Float64, ::GaussLobattoGrid)
     xs = [(l + h) / 2 + (h - l) / 2 * cos(π * (M - 1 - j) / (M - 1))
           for j in 0:M-1]
@@ -173,7 +214,7 @@ positive.
 
 # Reference
 Waldvogel, J. (2006). Fast construction of the Fejér and Clenshaw-Curtis
-quadrature rules. *SIAM J. Sci. Comput.*, 46(1), 195–202.
+quadrature rules. *BIT Numerical Mathematics*, 46, 195–202.
 """
 function _clenshaw_curtis_weights(M::Int, l::Float64, h::Float64)
     scale = (h - l) / 2

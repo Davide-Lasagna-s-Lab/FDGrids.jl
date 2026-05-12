@@ -9,6 +9,18 @@ row `i`, the WIDTH stencil weights occupy `coeffs[(i-1)*WIDTH+1 : i*WIDTH]`.
 
 `OPTIMISE` controls whether the diagonal of the LU factor U is stored inverted
 (saves one division per element in the triangular solve).
+
+# Examples
+```julia
+using LinearAlgebra
+
+xs = range(-1, 1; length = 64)
+D  = DiffMatrix(xs, 5, 1)   # first derivative, 5-point stencil
+
+u  = sin.(xs)
+du = similar(u)
+mul!(du, D, u)
+```
 """
 struct DiffMatrix{T, WIDTH, OPTIMISE} <: AbstractMatrix{T}
     coeffs :: Vector{T}
@@ -19,9 +31,19 @@ struct DiffMatrix{T, WIDTH, OPTIMISE} <: AbstractMatrix{T}
     Construct a finite-difference differentiation matrix on `xs` of the given
     stencil `width` and derivative `order`.
 
+    The grid points in `xs` may be non-uniform, but they should be distinct and
+    ordered consistently with the arrays to which the operator will be applied.
+    Boundary rows use one-sided stencils of the same width.
+
     # Keyword Arguments
     - `optimise::Bool=true`: pre-invert the diagonal of U during LU factorisation.
     - `eltype::Type=Float64`: element type of the coefficients.
+
+    # Examples
+    ```julia
+    xs = grid(32, -1, 1, GaussLobattoGrid()).xs
+    D2 = DiffMatrix(xs, 7, 2; eltype = Float64)
+    ```
     """
     function DiffMatrix(xs::AbstractVector, width::Int, order::Int;
                         optimise::Bool = true,
@@ -44,13 +66,38 @@ end
 # AbstractMatrix interface
 # ================================================================================
 
+"""
+    size(d::DiffMatrix) -> (N, N)
+
+Return the dense matrix dimensions represented by `d`.
+
+`DiffMatrix` stores only `WIDTH` coefficients per row, but it behaves as a
+square `N×N` matrix where `N = length(d.coeffs) ÷ WIDTH`.
+"""
 function Base.size(d::DiffMatrix{T, WIDTH}) where {T, WIDTH}
     N = length(d.coeffs) ÷ WIDTH
     return (N, N)
 end
 
+"""
+    IndexStyle(::DiffMatrix)
+
+Declare Cartesian indexing for `DiffMatrix`.
+
+The matrix is logically two-dimensional and computing a scalar entry requires
+both row and column indices, so Cartesian indexing is the natural array
+interface.
+"""
 Base.IndexStyle(::DiffMatrix) = IndexCartesian()
 
+"""
+    getindex(d::DiffMatrix, i, j)
+
+Return the logical dense-matrix entry `d[i,j]`.
+
+Entries outside the finite-difference stencil are returned as zero. Boundary
+rows use shifted one-sided stencils, while interior rows use centered stencils.
+"""
 function Base.getindex(d::DiffMatrix{T, WIDTH}, i::Int, j::Int) where {T, WIDTH}
     HWIDTH = WIDTH >> 1
     offset = i ≤              HWIDTH ?          HWIDTH - i + 1 :
@@ -59,6 +106,15 @@ function Base.getindex(d::DiffMatrix{T, WIDTH}, i::Int, j::Int) where {T, WIDTH}
     return (1 ≤ m ≤ WIDTH) ? d.coeffs[(i - 1)*WIDTH + m] : zero(T)
 end
 
+"""
+    setindex!(d::DiffMatrix, v, i, j)
+
+Set the stored stencil coefficient corresponding to logical entry `d[i,j]`.
+
+If `(i,j)` lies outside the compact stencil for row `i`, the assignment is
+ignored and `T(v)` is returned. This mirrors the compact storage model: values
+outside the band are always represented as structural zeros.
+"""
 function Base.setindex!(d::DiffMatrix{T, WIDTH}, v, i::Int, j::Int) where {T, WIDTH}
     HWIDTH = WIDTH >> 1
     offset = i ≤              HWIDTH ?          HWIDTH - i + 1 :
@@ -70,11 +126,23 @@ function Base.setindex!(d::DiffMatrix{T, WIDTH}, v, i::Int, j::Int) where {T, WI
     return T(v)
 end
 
+"""
+    similar(d::DiffMatrix, [S]) -> DiffMatrix{S}
+
+Allocate an uninitialised `DiffMatrix` with the same size, stencil width, and
+optimisation flag as `d`, optionally changing the element type to `S`.
+"""
 function Base.similar(d::DiffMatrix{T, WIDTH, OPTIMISE}, ::Type{S}=T) where {T, S, WIDTH, OPTIMISE}
     N = length(d.coeffs) ÷ WIDTH
     return DiffMatrix{S, WIDTH, OPTIMISE}(Vector{S}(undef, N * WIDTH))
 end
 
+"""
+    copy(d::DiffMatrix) -> DiffMatrix
+
+Return a deep copy of the compact coefficient storage while preserving the
+type parameters of `d`.
+"""
 Base.copy(d::DiffMatrix{T, WIDTH, OPTIMISE}) where {T, WIDTH, OPTIMISE} =
     DiffMatrix{T, WIDTH, OPTIMISE}(copy(d.coeffs))
 
@@ -82,6 +150,17 @@ Base.copy(d::DiffMatrix{T, WIDTH, OPTIMISE}) where {T, WIDTH, OPTIMISE} =
     full(A::DiffMatrix) -> Matrix{T}
 
 Expand the compact stencil representation into a dense `N×N` matrix.
+
+This is mainly intended for inspection, testing, and comparison with dense
+linear algebra. Applying a `DiffMatrix` with `mul!` uses the compact stencil
+storage directly and avoids building this dense matrix.
+
+# Examples
+```julia
+xs = range(-1, 1; length = 8)
+D  = DiffMatrix(xs, 3, 1)
+M  = full(D)
+```
 """
 function full(A::DiffMatrix{T, WIDTH}) where {T, WIDTH}
     N   = length(A.coeffs) ÷ WIDTH
@@ -102,6 +181,13 @@ end
 
 struct DiffMatrixStyle{T, WIDTH, OPTIMISE} <: Broadcast.BroadcastStyle end
 
+"""
+    BroadcastStyle(::Type{<:DiffMatrix})
+
+Broadcasting over a `DiffMatrix` preserves the compact finite-difference matrix
+container whenever the result can still be represented with a compatible stencil
+width.
+"""
 Base.BroadcastStyle(::Type{<:DiffMatrix{T, WIDTH, OPTIMISE}}) where {T, WIDTH, OPTIMISE} =
     DiffMatrixStyle{T, WIDTH, OPTIMISE}()
 
@@ -111,5 +197,11 @@ Base.BroadcastStyle(::LinearAlgebra.StructuredMatrixStyle{<:LinearAlgebra.Diagon
 Base.BroadcastStyle(::DiffMatrixStyle{T1, W1, O1}, ::DiffMatrixStyle{T2, W2, O2}) where {T1, T2, W1, W2, O1, O2} =
     DiffMatrixStyle{promote_type(T1, T2), max(W1, W2), O1 || O2}()
 
+"""
+    similar(bc::Broadcasted{DiffMatrixStyle}, S) -> DiffMatrix{S}
+
+Allocate the destination container for broadcasts whose dominant style is
+`DiffMatrixStyle`.
+"""
 Base.similar(bc::Base.Broadcast.Broadcasted{DiffMatrixStyle{T, WIDTH, OPTIMISE}}, ::Type{S}) where {T, WIDTH, OPTIMISE, S} =
     DiffMatrix{S, WIDTH, OPTIMISE}(Vector{S}(undef, axes(bc)[1][end] * WIDTH))
