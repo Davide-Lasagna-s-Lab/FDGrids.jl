@@ -39,7 +39,7 @@ end
 # ─── Collect timings ─────────────────────────────────────────────────────────
 println("Benchmarking mul!…")
 
-# results[ndim][width][dim] = Vector{Float64}  (one entry per size)
+# results[ndim][width][dim] = Vector{Float64}  (one entry per valid size)
 results = Dict{Int, Dict{Int, Dict{Int, Vector{Float64}}}}()
 
 for ndim in 1:4
@@ -51,13 +51,13 @@ for ndim in 1:4
         end
     end
     for sz in SIZES_BY_NDIM[ndim]
-        total = sz^ndim
         for width in WIDTHS
+            sz < width && continue
             for dim in 1:ndim
                 print("  $(ndim)D  sz=$sz  width=$width  dim=$dim … ")
                 t = time_mul(sz, ndim, dim, width)
                 push!(results[ndim][width][dim], t)
-                @printf "%.2f μs  (%.2f GEl/s)\n" t*1e6 total/t/1e9
+                @printf "%.2f μs\n" t*1e6
             end
         end
     end
@@ -69,32 +69,33 @@ width_col = Dict(3 => colors[1], 5 => colors[2], 7 => colors[3])
 dim_style = [:solid, :dash, :dashdot, :dot]
 
 fig = Figure(size=(1100, 900))
-Label(fig[0, :], "mul! throughput — DiffMatrix applied along each array axis";
+Label(fig[0, :], "mul! wall time — DiffMatrix applied along each array axis";
       fontsize=14, font=:bold)
 
 for ndim in 1:4
     row = cld(ndim, 2)
     col = isodd(ndim) ? 1 : 2
-    sizes = SIZES_BY_NDIM[ndim]
-    total_elements = [sz^ndim for sz in sizes]
+    all_sizes = SIZES_BY_NDIM[ndim]
 
     ax = Axis(fig[row, col];
         title   = "$(ndim)D array",
         xlabel  = "Total elements",
-        ylabel  = "Throughput (GEl/s)",
+        ylabel  = "Time (μs)",
         xscale  = log10,
         yscale  = log10,
         xtickformat = xs -> [@sprintf("%.0e", x) for x in xs])
 
     for width in WIDTHS
+        # Only use sizes that are valid for this width
+        valid_sizes   = [sz for sz in all_sizes if sz >= width]
+        total_elements = [sz^ndim for sz in valid_sizes]
         for dim in 1:ndim
             ts = results[ndim][width][dim]
-            throughput = total_elements ./ ts ./ 1e9
-            lines!(ax, total_elements, throughput;
+            lines!(ax, total_elements, ts .* 1e6;
                 color     = width_col[width],
                 linestyle = dim_style[dim],
                 linewidth = 1.5)
-            scatter!(ax, total_elements, throughput;
+            scatter!(ax, total_elements, ts .* 1e6;
                 color     = width_col[width],
                 markersize = 5)
         end

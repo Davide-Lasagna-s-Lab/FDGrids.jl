@@ -5,7 +5,7 @@
 #   FDGrids  — lu!(copy(D)) → DiffMatrix (factorised in-place) → @generated ldiv!
 #   Generic  — same factorisation but dispatched through plain scalar loops
 #
-# Sweeps over grid sizes and stencil widths 3, 5, 7.
+# Sweeps over grid sizes and stencil widths 3, 5, 7 (width = number of stencil points).
 # Saves linsolve_speedup.svg to ../docs/src/assets/benchmarks/.
 #
 # Setup (once):
@@ -17,12 +17,15 @@
 using BenchmarkTools, LinearAlgebra, FDGrids, CairoMakie, Printf
 
 const WIDTHS  = [3, 5, 7]
-const SIZES   = [8, 16, 32, 64, 128, 256, 512, 1024, 2048]
+const SIZES   = [16, 32, 64, 128, 256, 512, 1024, 2048]
 const SAMPLES = 300
 
 function time_solve(N, width)
     xs = collect(range(-1.0, 1.0; length=N))
     D  = DiffMatrix(xs, width, 1)
+    # Replace boundary rows with identity to enforce Dirichlet BCs and make D non-singular.
+    D[1,   :] .= [1; zeros(N - 1)]
+    D[end, :] .= [zeros(N - 1); 1]
     b  = randn(N)
 
     # LAPACK pivoted banded LU
@@ -47,15 +50,15 @@ for w in WIDTHS
     t_lapack = Float64[]
     t_fd     = Float64[]
     t_gen    = Float64[]
+    sizes_w  = Int[]
     for N in SIZES
+        N < w && continue
         print("  width=$w  N=$N … ")
         tl, tf, tg = time_solve(N, w)
-        push!(t_lapack, tl)
-        push!(t_fd,     tf)
-        push!(t_gen,    tg)
+        push!(t_lapack, tl); push!(t_fd, tf); push!(t_gen, tg); push!(sizes_w, N)
         @printf "LAPACK %.2f μs  FDGrids %.2f μs  Generic %.2f μs\n" tl*1e6 tf*1e6 tg*1e6
     end
-    results[w] = (lapack=t_lapack, fdgrids=t_fd, generic=t_gen)
+    results[w] = (sizes=sizes_w, lapack=t_lapack, fdgrids=t_fd, generic=t_gen)
 end
 
 # ─── Figure ───────────────────────────────────────────────────────────────────
@@ -90,13 +93,13 @@ for w in WIDTHS
     col = width_col[w]
     lab = "width $w"
 
-    lines!(ax1, SIZES, r.lapack  .* 1e6; color=col, linestyle=:solid,  linewidth=2, label="$lab LAPACK")
-    lines!(ax1, SIZES, r.fdgrids .* 1e6; color=col, linestyle=:dash,   linewidth=2, label="$lab FDGrids")
-    lines!(ax1, SIZES, r.generic .* 1e6; color=col, linestyle=:dot,    linewidth=2, label="$lab Generic")
+    lines!(ax1, r.sizes, r.lapack  .* 1e6; color=col, linestyle=:solid,  linewidth=2, label="$lab LAPACK")
+    lines!(ax1, r.sizes, r.fdgrids .* 1e6; color=col, linestyle=:dash,   linewidth=2, label="$lab FDGrids")
+    lines!(ax1, r.sizes, r.generic .* 1e6; color=col, linestyle=:dot,    linewidth=2, label="$lab Generic")
 
     speedup = r.lapack ./ r.fdgrids
-    lines!(ax2,   SIZES, speedup; color=col, linewidth=2, label=lab)
-    scatter!(ax2, SIZES, speedup; color=col, markersize=6)
+    lines!(ax2,   r.sizes, speedup; color=col, linewidth=2, label=lab)
+    scatter!(ax2, r.sizes, speedup; color=col, markersize=6)
 end
 
 # Shared legend entries for line styles (left panel)
