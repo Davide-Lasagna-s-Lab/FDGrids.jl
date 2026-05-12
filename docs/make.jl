@@ -31,6 +31,7 @@ makedocs(
             "Linear Solves" => "manual/linear-solves.md",
             "Numerical Methods" => "manual/methods.md",
             "Internal Layout and Kernels" => "manual/internals.md",
+            "Benchmarks" => "manual/benchmarks.md",
         ],
         "API Reference" => "api.md",
         "Deprecated API" => "deprecated.md",
