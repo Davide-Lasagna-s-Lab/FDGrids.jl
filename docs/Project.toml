@@ -1,0 +1,6 @@
+[deps]
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+FDGrids = "28eb41cd-435a-4ede-8bdb-f2685fc03e8c"
+
+[compat]
+Documenter = "1"

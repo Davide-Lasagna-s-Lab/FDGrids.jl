@@ -2,6 +2,8 @@
   <img src="assets/logo.svg" alt="FDGrids.jl logo" width="640">
 </p>
 
+[![Documentation](https://img.shields.io/badge/docs-dev-blue.svg)](https://Davide-Lasagna-s-Lab.github.io/FDGrids.jl/dev/)
+
 # FDGrids.jl
 
 Finite-difference differentiation matrices and one-dimensional grids for Julia.
@@ -19,6 +21,19 @@ on uniform and non-uniform grids. It provides:
 The package is aimed at numerical PDE, stability, and spectral/finite-difference
 workflows where the same one-dimensional differentiation operator is applied
 many times to vectors, matrices, or higher-dimensional arrays.
+
+## Documentation
+
+The full documentation is built with Documenter.jl and is available at the
+[development documentation site](https://Davide-Lasagna-s-Lab.github.io/FDGrids.jl/dev/).
+The source lives in [`docs/src`](docs/src/index.md). Useful entry points are:
+
+- [Getting Started](docs/src/tutorials/getting-started.md)
+- [Dimension-Wise Differentiation](docs/src/tutorials/dimension-wise.md)
+- [Weighted Adjoints](docs/src/tutorials/weighted-adjoints.md)
+- [Decomposed Domains](docs/src/tutorials/decomposed-domains.md)
+- [Internal Layout and Kernels](docs/src/manual/internals.md)
+- [API Reference](docs/src/api.md)
 
 ## Installation
 
@@ -112,10 +127,7 @@ use the stored one-sided stencils, while interior fibers use the centered
 stencil block.
 
 There are also lower-level `mul!` methods with `(global_idx, local_rng)`
-arguments. Those are intended for distributed or slab-local arrays: `local_rng`
-selects the local part of the differentiated dimension, while `global_idx`
-states where that local range begins in the global row numbering of the
-operator.
+arguments for decomposed domains; see the next section.
 
 There is also a point-evaluation method when only one row of the operator is
 needed:
@@ -123,6 +135,67 @@ needed:
 ```julia
 du_at_10 = mul!(D, sin.(g.xs), 10)
 ```
+
+## Decomposed Domains
+
+For distributed arrays or slab-local storage, `FDGrids.jl` provides lower-level
+`mul!` methods that apply a global `DiffMatrix` to a local piece of the
+differentiated dimension:
+
+```julia
+mul!(y_local, D, x_local, Val(DIM), global_idx, local_rng)
+```
+
+Here:
+
+- `DIM` is the array dimension being differentiated.
+- `local_rng` selects the local indices in `x_local` and `y_local` along `DIM`.
+- `global_idx` is the global row index corresponding to local index `1`.
+
+This separates the local array layout from the global finite-difference row
+numbering. A caller can store a slab of the full domain, possibly with halo
+points, while still using the coefficients associated with the correct global
+rows of `D`.
+
+For example, suppose the differentiated direction has global length `nx = 64`,
+the stencil width is `5`, and a process owns rows `17:32`. A width-5 centered
+stencil needs two neighboring points on each side, so the local storage includes
+the halo range `15:34`, while `local_rng` selects only the owned rows:
+
+```julia
+nx = 64
+ny = 8
+
+g = grid(nx, -1, 1, GaussLobattoGrid())
+D = DiffMatrix(g.xs, 5, 1)
+
+owned  = 17:32
+stored = 15:34
+local_owned = (first(owned) - first(stored) + 1):(last(owned) - first(stored) + 1)
+
+x_local = randn(length(stored), ny)
+y_local = similar(x_local)
+
+mul!(y_local, D, x_local, Val(1), first(stored), local_owned)
+```
+
+The same idea works when the decomposed direction is not the first array
+dimension:
+
+```julia
+x_local = randn(ny, length(stored))
+y_local = similar(x_local)
+
+mul!(y_local, D, x_local, Val(2), first(stored), local_owned)
+```
+
+These methods do not perform communication or halo exchange themselves. They
+assume that `x_local` contains the values needed by the requested `local_rng`.
+If no halo values are present, the caller should restrict `local_rng` to the
+rows whose stencils are available locally, or fill boundary rows by another
+communication/computation step. The purpose of the interface is to let a
+domain-decomposition layer provide the storage and communication policy while
+reusing the generated finite-difference kernels.
 
 ## Grids and Quadrature
 
@@ -137,7 +210,7 @@ Available grid distributions are:
 
 - `UniformGrid()`:
   equally spaced points with composite trapezoidal weights.
-- `MappedGrid(α=0.5, order=4)`:
+- `MappedGrid(α=0.5, order=2)`:
   mapped Chebyshev-like points with composite Newton-Cotes weights.
 - `GaussLobattoGrid()`:
   Chebyshev-Lobatto points with Clenshaw-Curtis weights.
@@ -222,6 +295,36 @@ The linear algebra implementation has three layers:
 
 Performance-sensitive code should use the compact path, as in the example
 above.
+
+## Internal Layout
+
+The central performance idea is that `DiffMatrix` stores coefficients row by
+row rather than storing a dense matrix. For a stencil width `width`, row `i`
+uses:
+
+```julia
+coeffs[(i - 1) * width + 1 : i * width]
+```
+
+Those `width` coefficients multiply the corresponding local stencil of the
+input array. Boundary rows use shifted one-sided stencils, so every row still
+has exactly `width` entries. This uniform layout lets `mul!` keep a single
+running pointer into `coeffs` and unroll the dot product in generated code.
+
+`AdjointDiffMatrix` uses a different layout because columns of the forward
+matrix do not all receive `width` contributions near the boundaries. Its
+coefficient vector is output-major:
+
+- head outputs have a growing number of coefficients,
+- interior outputs have exactly `width` coefficients,
+- tail outputs have a shrinking number of coefficients.
+
+The helper `_ptr_for_j` gives the first coefficient for output row `j`.
+Generated adjoint kernels use that pointer and advance by the number of
+coefficients in the current output row.
+
+For a full developer-oriented explanation, including diagrams and pseudo-code,
+see [Internal Layout and Kernels](docs/src/manual/internals.md).
 
 ## Numerical Methods
 

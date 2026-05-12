@@ -25,7 +25,7 @@ abstract type AbstractGridDistribution end
 
 
 """
-    MappedGrid(α=0.5, order=4)
+    MappedGrid(α=0.5, order=2)
 
 Mapped Chebyshev grid with clustering parameter `α ∈ (0,1]`. Nodes are placed at
 
@@ -35,7 +35,8 @@ Mapped Chebyshev grid with clustering parameter `α ∈ (0,1]`. Nodes are placed
 
 `order` is the polynomial degree of the composite Newton-Cotes quadrature rule.
 Positive weights are not guaranteed for high `order` or strongly non-uniform nodes.
-Typical values: `1` (trapezoidal), `2` (Simpson), `3`, `4`.
+The default is `order=2`, i.e. Simpson panels. Other typical values are
+`1` (trapezoidal), `3`, and `4`.
 
 # Examples
 ```julia

@@ -1,2 +1,4 @@
 Manifest.toml
 *.png
+/docs/Manifest.toml
+/docs/build/

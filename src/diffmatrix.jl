@@ -100,6 +100,8 @@ rows use shifted one-sided stencils, while interior rows use centered stencils.
 """
 function Base.getindex(d::DiffMatrix{T, WIDTH}, i::Int, j::Int) where {T, WIDTH}
     HWIDTH = WIDTH >> 1
+    # Boundary rows use shifted one-sided stencils. `offset` converts the
+    # logical dense column j into the compact row-local coefficient index m.
     offset = i ≤              HWIDTH ?          HWIDTH - i + 1 :
              i > size(d, 1) - HWIDTH ? size(d, 1) - HWIDTH - i : 0
     m = HWIDTH + j - i + 1 - offset
@@ -117,6 +119,9 @@ outside the band are always represented as structural zeros.
 """
 function Base.setindex!(d::DiffMatrix{T, WIDTH}, v, i::Int, j::Int) where {T, WIDTH}
     HWIDTH = WIDTH >> 1
+    # Keep this index calculation in sync with getindex. Mutating entries
+    # outside the stored stencil is intentionally ignored because those entries
+    # are structural zeros in the compact representation.
     offset = i ≤              HWIDTH ?          HWIDTH - i + 1 :
              i > size(d, 1) - HWIDTH ? size(d, 1) - HWIDTH - i : 0
     m = HWIDTH + j - i + 1 - offset
@@ -166,6 +171,7 @@ function full(A::DiffMatrix{T, WIDTH}) where {T, WIDTH}
     N   = length(A.coeffs) ÷ WIDTH
     out = zeros(T, N, N)
     @simd for i in 1:N
+        # `left` is the first dense column touched by compact row i.
         left = clamp(i - (WIDTH >> 1), 1, N - WIDTH + 1)
         for p in 1:WIDTH
             out[i, left + p - 1] = A.coeffs[(i - 1)*WIDTH + p]

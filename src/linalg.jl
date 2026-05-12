@@ -189,7 +189,7 @@ end
 """
     ldiv!(A::AbstractMatrix, b, p, q) -> b
 
-Solve a banded system after `A` has already been factorised by `_banded_lu!`.
+Solve a banded system after `A` has already been factorised by `banded_lu!`.
 
 `p` and `q` must match the bandwidths used during factorisation. The solution is
 written in place into `b`.
@@ -200,6 +200,49 @@ below.
 """
 LinearAlgebra.ldiv!(A::AbstractMatrix, b::AbstractVector, p::Int, q::Int) = 
     _banded_triu_solve!(A, _banded_tril_solve!(A, b, p), q)
+
+"""
+    banded_lu!(A, p, q; optimise=false) -> A
+
+Public wrapper around the generic reference banded LU factorisation.
+
+`p` is the number of subdiagonals and `q` is the number of superdiagonals.
+The matrix `A` is overwritten with the no-pivot LU factors produced by the
+reference implementation `_banded_lu!`.
+
+This routine is intended for reference and experimentation with ordinary
+matrices. Performance-critical code using `DiffMatrix` should prefer
+`lu!(copy(D))` and `ldiv!(Dfac, rhs)`.
+"""
+banded_lu!(A::AbstractMatrix, p::Int, q::Int; optimise::Bool=false) =
+    _banded_lu!(A, p, q, optimise)
+
+"""
+    banded_tril_solve!(L, b, p) -> b
+
+Public wrapper around the generic reference forward-substitution routine.
+
+`L` is assumed to contain the unit-lower triangular factor produced by
+`banded_lu!`, and only the first `p` subdiagonals are inspected. The vector `b`
+is overwritten.
+"""
+banded_tril_solve!(L::AbstractMatrix, b::AbstractVector, p::Int) =
+    _banded_tril_solve!(L, b, p)
+
+"""
+    banded_triu_solve(U, b, q) -> b
+
+Public wrapper around the generic reference back-substitution routine.
+
+`U` is assumed to contain the upper triangular factor produced by `banded_lu!`,
+and only the first `q` superdiagonals are inspected. The vector `b` is
+overwritten.
+
+This exported name is kept for compatibility with the existing public API even
+though the function mutates `b`.
+"""
+banded_triu_solve(U::AbstractMatrix, b::AbstractVector, q::Int) =
+    _banded_triu_solve!(U, b, q)
 
 
 # ================================================================================

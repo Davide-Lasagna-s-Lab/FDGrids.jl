@@ -82,11 +82,19 @@ function _make_loop_expr_forward(DIM, N, WIDTH)
     HWIDTH = WIDTH >> 1
 
     preamble = quote
+        # Split the local rows into the same three regions used by DiffMatrix:
+        # a left-boundary head, a centered body, and a right-boundary tail.
+        # In decomposed-domain calls, local_rng may cover only a subset of the
+        # local storage. global_idx maps local index 1 to the global row number.
         head_range = max(1, local_rng[1]):min($HWIDTH, local_rng[end])
         body_range = max($HWIDTH + 1, local_rng[1]):min(size(x, $DIM) - $HWIDTH, local_rng[end])
         tail_range = max(size(x, $DIM) - $HWIDTH + 1, local_rng[1]):min(size(x, $DIM), local_rng[end])
         has_head   = global_idx == 1 && local_rng[1] ≤ $HWIDTH
         has_tail   = global_idx + local_rng[end] - 1 > size(A, 1) - $HWIDTH
+
+        # The coefficient pointer is global-row based. Find the first local row
+        # that this call will actually compute and jump directly to its row in
+        # the compact row-major coefficient vector.
         _f_local   = has_head ? local_rng[1] :
                      !isempty(body_range) ? first(body_range) :
                      first(tail_range)
@@ -102,6 +110,8 @@ function _make_loop_expr_forward(DIM, N, WIDTH)
     inner_tail = tail_kernel
     for d in 1:DIM-1
         rng        = :(1:$(Symbol(:N, d)))
+        # Dimensions before DIM must be nested inside the differentiated loop
+        # so that all non-DIM coordinates are visited for each stencil row.
         inner_head = Expr(:for, Expr(:(=), Symbol(:i, d), rng), inner_head)
         inner_body = Expr(:for, Expr(:(=), Symbol(:i, d), rng), inner_body)
         inner_tail = Expr(:for, Expr(:(=), Symbol(:i, d), rng), inner_tail)
@@ -154,11 +164,17 @@ function _make_loop_expr_adjoint(DIM, N, WIDTH)
     HWIDTH = WIDTH >> 1
 
     preamble = quote
+        # Adjoint output rows use variable-length head/tail regions. The body
+        # has fixed WIDTH coefficients, but the first/last WIDTH rows do not.
         head_range = max(1, local_rng[1]):min($WIDTH, local_rng[end])
         body_range = max($WIDTH + 1, local_rng[1]):min(size(x, $DIM) - $WIDTH, local_rng[end])
         tail_range = max(size(x, $DIM) - $WIDTH + 1, local_rng[1]):min(size(x, $DIM), local_rng[end])
         has_head   = global_idx == 1 && local_rng[1] ≤ $WIDTH
         has_tail   = global_idx + local_rng[end] - 1 > size(A, 1) - $WIDTH
+
+        # Unlike the forward operator, the pointer cannot be computed by a
+        # simple WIDTH stride in the head/tail. _ptr_for_j encodes the compact
+        # variable-length adjoint storage layout.
         _g_first_local = has_head ? local_rng[1] :
                          !isempty(body_range) ? first(body_range) :
                          first(tail_range)
@@ -262,7 +278,7 @@ end
 Distribution-aware backend for the forward operator. `@generated` for the concrete
 `(T, N, WIDTH, DIM)` combination.
 
-- `global_idx`: global index of `local_rng[1]` in the row numbering of `A`.
+- `global_idx`: global row index corresponding to local index `1` of `x`/`y`.
 - `local_rng`: local portion of dimension `DIM` to process.
 
 This method is intended for domain-decomposed callers. Ordinary local arrays
@@ -335,7 +351,7 @@ end
 Distribution-aware backend for the adjoint operator. `@generated` for the concrete
 `(T, N, WIDTH, DIM)` combination.
 
-- `global_idx`: global index of `local_rng[1]`. Set to `1` for non-distributed calls.
+- `global_idx`: global row index corresponding to local index `1` of `x`/`y`.
 - `local_rng`: local portion of dimension `DIM` to process.
 
 This method is intended for distributed or slab-local application of an adjoint

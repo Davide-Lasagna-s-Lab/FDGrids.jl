@@ -60,10 +60,16 @@ a fixed-width body, and a shrinking tail.
 function _ptr_for_j(j::Int, N::Int, ::Val{WIDTH}) where {WIDTH}
     HWIDTH = WIDTH >> 1
     if j ≤ WIDTH
+        # Head rows have lengths HWIDTH+1, HWIDTH+2, ..., HWIDTH+j.
+        # Summing those previous row lengths gives the triangular term.
         return 1 + HWIDTH*(j - 1) + (j - 1)*j÷2
     elseif j ≤ N - WIDTH
+        # Body rows all have fixed length WIDTH. The head region stores exactly
+        # WIDTH^2 coefficients, so this collapses to the same row-major formula.
         return (j - 1)*WIDTH + 1
     else
+        # Tail rows shrink by one coefficient per row. Count from the first tail
+        # row, after all head and body coefficients have been stored.
         jt = j - (N - WIDTH)
         return (N - WIDTH)*WIDTH + 1 +
                (WIDTH + HWIDTH + 1)*(jt - 1) - (jt - 1)*jt÷2
@@ -84,6 +90,12 @@ function _build_adjoint_coeffs(D::DiffMatrix{T, WIDTH}, w::AbstractVector{T}) wh
     N      = size(D, 1)
     out    = Vector{T}(undef, N * WIDTH)
     ptr    = 1
+
+    # The loops are over adjoint output rows j, i.e. columns of the parent D.
+    # For each nonzero D[i,j], store the coefficient used in
+    #     y[j] += D[i,j] * w[i] / w[j] * x[i].
+    # With w == ones(T, N), this is the ordinary transpose.
+
     for j in 1:WIDTH
         wj = w[j]
         for i in 1:(j + HWIDTH)
@@ -207,6 +219,9 @@ function Base.getindex(d::AdjointDiffMatrix{T, WIDTH}, i::Int, j::Int) where {T,
 
     N      = size(d, 1)
     HWIDTH = WIDTH >> 1
+
+    # Row i of the adjoint has variable support near the boundaries. These
+    # bounds mirror the head/body/tail layout used in _build_adjoint_coeffs.
     ilo    = i ≤ WIDTH ? 1 :
              i ≤ N - WIDTH ? i - HWIDTH :
              i - HWIDTH
