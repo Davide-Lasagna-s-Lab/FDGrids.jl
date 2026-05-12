@@ -214,7 +214,7 @@ positive.
 
 # Reference
 Waldvogel, J. (2006). Fast construction of the Fejér and Clenshaw-Curtis
-quadrature rules. *SIAM J. Sci. Comput.*, 46(1), 195–202.
+quadrature rules. *BIT Numerical Mathematics*, 46, 195–202.
 """
 function _clenshaw_curtis_weights(M::Int, l::Float64, h::Float64)
     scale = (h - l) / 2
