@@ -17,7 +17,7 @@
 using BenchmarkTools, LinearAlgebra, FDGrids, CairoMakie, Printf
 
 const WIDTHS  = [3, 5, 7]
-const SIZES   = [32, 64, 128, 256, 512, 1024, 2048]
+const SIZES   = [8, 16, 32, 64, 128, 256, 512, 1024, 2048]
 const SAMPLES = 300
 
 function time_solve(N, width)
