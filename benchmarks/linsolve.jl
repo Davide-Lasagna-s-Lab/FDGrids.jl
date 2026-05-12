@@ -14,7 +14,7 @@
 # Run:
 #   julia --project=benchmarks benchmarks/linsolve.jl
 
-using BenchmarkTools, LinearAlgebra, FDGrids, CairoMakie
+using BenchmarkTools, LinearAlgebra, FDGrids, CairoMakie, Printf
 
 const WIDTHS  = [3, 5, 7]
 const SIZES   = [32, 64, 128, 256, 512, 1024, 2048]
@@ -59,8 +59,6 @@ for w in WIDTHS
 end
 
 # ─── Figure ───────────────────────────────────────────────────────────────────
-using Printf
-
 colors    = Makie.wong_colors()
 width_col = Dict(3 => colors[1], 5 => colors[2], 7 => colors[3])
 

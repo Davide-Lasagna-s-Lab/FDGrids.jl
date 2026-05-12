@@ -13,7 +13,7 @@
 # Run:
 #   julia --project=benchmarks benchmarks/matmul.jl
 
-using BenchmarkTools, LinearAlgebra, FDGrids, CairoMakie
+using BenchmarkTools, LinearAlgebra, FDGrids, CairoMakie, Printf
 
 # Per-axis grid sizes for each array dimension.
 # Total elements grow as size^N, so we shrink the range for higher N.
