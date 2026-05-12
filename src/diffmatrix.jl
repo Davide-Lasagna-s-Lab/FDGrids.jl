@@ -167,18 +167,7 @@ D  = DiffMatrix(xs, 3, 1)
 M  = full(D)
 ```
 """
-function full(A::DiffMatrix{T, WIDTH}) where {T, WIDTH}
-    N   = length(A.coeffs) ÷ WIDTH
-    out = zeros(T, N, N)
-    @simd for i in 1:N
-        # `left` is the first dense column touched by compact row i.
-        left = clamp(i - (WIDTH >> 1), 1, N - WIDTH + 1)
-        for p in 1:WIDTH
-            out[i, left + p - 1] = A.coeffs[(i - 1)*WIDTH + p]
-        end
-    end
-    return out
-end
+full(A::DiffMatrix{T}) where {T} = [A[i, j] for i in 1:size(A, 1), j in 1:size(A, 2)]
 
 
 # ================================================================================
