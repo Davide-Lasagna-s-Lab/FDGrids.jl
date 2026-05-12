@@ -32,7 +32,7 @@ The left panel shows absolute solve time; the right panel shows the speedup of
 the FDGrids path over LAPACK.
 
 ```@raw html
-<img src="../assets/benchmarks/linsolve_speedup.svg"
+<img src="../../assets/benchmarks/linsolve_speedup.svg"
      alt="Linear solve speedup"
      style="width:100%; max-width:900px;" />
 ```
@@ -55,7 +55,7 @@ elements divided by median wall time.  Higher is better.  Line colour encodes
 stencil width; line style encodes the differentiation direction.
 
 ```@raw html
-<img src="../assets/benchmarks/matmul.svg"
+<img src="../../assets/benchmarks/matmul.svg"
      alt="mul! throughput"
      style="width:100%; max-width:1100px;" />
 ```
