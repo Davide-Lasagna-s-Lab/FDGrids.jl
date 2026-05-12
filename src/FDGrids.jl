@@ -8,7 +8,7 @@ include("adjoint.jl")
 include("linalg.jl")
 include("matmul.jl")
 include("grids.jl")
-include("quadrature.jl")
+include("deprecated.jl")
 
 export DiffMatrix,
        AdjointDiffMatrix,

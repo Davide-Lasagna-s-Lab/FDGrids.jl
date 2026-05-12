@@ -2,8 +2,7 @@ export AbstractGridDistribution,
        MappedGrid,
        UniformGrid,
        GaussLobattoGrid,
-       grid,
-       gridpoints   # retained for backward compatibility
+       grid
 
 # ================================================================================
 # Grid distribution types
@@ -239,31 +238,4 @@ function _quadweights_panel(xs::AbstractVector)
     b = [(xs[end]^(d + 1) - xs[1]^(d + 1)) / (d + 1) for d in 0:N-1]
     A = [xs[i]^d for d in 0:N-1, i in 1:N]
     return A \ b
-end
-
-
-# ================================================================================
-# Backward compatibility
-# ================================================================================
-
-"""
-    gridpoints(M, l=-1.0, h=1.0, α=0.5) -> Vector
-
-Return grid points only. Preserved for backward compatibility.
-For new code, prefer `grid(M, l, h, dist)` which returns both points and weights.
-"""
-function gridpoints(M::Int, l::Real = -1.0, h::Real = 1.0, α::Real = 0.5)
-    xs, _ = grid(M, l, h, MappedGrid(α))
-    return xs
-end
-
-"""
-    gridpoints(M, l, h, dist::AbstractGridDistribution) -> Vector
-
-Return grid points only for the given distribution.
-For new code, prefer `grid(M, l, h, dist)` which returns both points and weights.
-"""
-function gridpoints(M::Int, l::Real, h::Real, dist::AbstractGridDistribution)
-    xs, _ = grid(M, l, h, dist)
-    return xs
 end
