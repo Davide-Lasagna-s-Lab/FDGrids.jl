@@ -1,6 +1,6 @@
 name = "FDGrids"
 uuid = "28eb41cd-435a-4ede-8bdb-f2685fc03e8c"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["Davide Lasagna <davide.lasagna@soton.ac.uk>"]
 
 [deps]
