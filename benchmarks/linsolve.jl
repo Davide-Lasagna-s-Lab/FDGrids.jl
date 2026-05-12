@@ -14,7 +14,7 @@
 # Run:
 #   julia --project=benchmarks benchmarks/linsolve.jl
 
-using BenchmarkTools, LinearAlgebra, FDGrids, CairoMakie, Printf
+using BenchmarkTools, LinearAlgebra, FDGrids, CairoMakie, Printf, Statistics
 
 const WIDTHS  = [3, 5, 7]
 const SIZES   = [16, 32, 64, 128, 256, 512, 1024, 2048]
@@ -30,16 +30,16 @@ function time_solve(N, width)
 
     # LAPACK pivoted banded LU
     lu_lapack = lu(D)
-    t_lapack  = @belapsed ldiv!($lu_lapack, bc) setup=(bc=copy($b)) samples=SAMPLES evals=5
+    t_lapack  = median(@benchmark ldiv!($lu_lapack, bc) setup=(bc=copy($b)) samples=SAMPLES evals=5).time * 1e-9
 
     # FDGrids compact @generated solve
     lu_fd = lu!(copy(D))
-    t_fd  = @belapsed ldiv!($lu_fd, bc) setup=(bc=copy($b)) samples=SAMPLES evals=5
+    t_fd  = median(@benchmark ldiv!($lu_fd, bc) setup=(bc=copy($b)) samples=SAMPLES evals=5).time * 1e-9
 
     # Generic scalar reference (same factorised storage, different dispatch)
     lu_gen  = lu!(copy(D))
     WD      = width - 1
-    t_gen   = @belapsed ldiv!($lu_gen, bc, $WD, $WD) setup=(bc=copy($b)) samples=SAMPLES evals=5
+    t_gen   = median(@benchmark ldiv!($lu_gen, bc, $WD, $WD) setup=(bc=copy($b)) samples=SAMPLES evals=5).time * 1e-9
 
     return t_lapack, t_fd, t_gen
 end
@@ -120,6 +120,10 @@ Legend(fig[2, 2],
     width_elems,
     ["width $w" for w in WIDTHS];
     orientation=:horizontal, framevisible=false, tellwidth=false)
+
+cpu    = Sys.cpu_info()[1].model
+mem_gb = round(Int, Sys.total_memory() / 2^30)
+Label(fig[3, :], "CPU: $cpu  |  RAM: $(mem_gb) GB"; fontsize=9, color=:gray50)
 
 outdir = joinpath(@__DIR__, "..", "docs", "src", "assets", "benchmarks")
 mkpath(outdir)

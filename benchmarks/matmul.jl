@@ -1,9 +1,10 @@
 # Benchmark: DiffMatrix mul! across array dimensions 1–4, stencil widths 3/5/7,
 # and all differentiation directions.
 #
-# For each array dimension N (1,2,3,4) and stencil width, the benchmark measures
-# mul!(y, D, x, Val(dim)) for dim = 1…N and a range of per-axis grid sizes.
-# Arrays are square (same size along every axis).
+# All (ndim, width, dim, sz) combinations are collected into a list and run in
+# randomised order, repeated NRUNS times.  This spreads thermal effects and
+# cache-state bias across all configurations rather than concentrating them.
+# The median over NRUNS independent measurements is used for the final plot.
 #
 # Saves matmul.svg to ../docs/src/assets/benchmarks/.
 #
@@ -13,19 +14,17 @@
 # Run:
 #   julia --project=benchmarks benchmarks/matmul.jl
 
-using BenchmarkTools, LinearAlgebra, FDGrids, CairoMakie, Printf
+using BenchmarkTools, LinearAlgebra, FDGrids, CairoMakie, Printf, Random, Statistics
 
-# Per-axis grid sizes for each array dimension.
-# Total elements grow as size^N, so we shrink the range for higher N.
 const SIZES_BY_NDIM = Dict(
-    1 => [32, 64, 128, 256, 512, 1024],
-    2 => [16, 32, 64, 128, 256],
+    1 => [32, 64, 128, 256, 512, 1024, 2048, 4096],
+    2 => [16, 32, 64, 128, 256, 512, 1024],
     3 => [8,  16, 32, 64,  128],
     4 => [8,  12, 16, 24,  32],
 )
-const WIDTHS   = [3, 5, 7]
-const ORDER    = 1
-const SAMPLES  = 200
+const WIDTHS = [3, 5, 7]
+const ORDER  = 1
+const NRUNS  = 10   # independent randomised passes over all configurations
 
 function time_mul(sz, ndim, dim, width)
     sizes = ntuple(_ -> sz, ndim)
@@ -33,33 +32,30 @@ function time_mul(sz, ndim, dim, width)
     D     = DiffMatrix(xs, width, ORDER)
     x     = randn(sizes...)
     y     = similar(x)
-    return @belapsed mul!($y, $D, $x, $(Val(dim))) samples=SAMPLES evals=3
+    return @belapsed mul!($y, $D, $x, $(Val(dim))) evals=5 samples=3
 end
 
 # ─── Collect timings ─────────────────────────────────────────────────────────
-println("Benchmarking mul!…")
+println("Building configuration list…")
 
-# results[ndim][width][dim] = Vector{Float64}  (one entry per valid size)
-results = Dict{Int, Dict{Int, Dict{Int, Vector{Float64}}}}()
+configs = NamedTuple[]
+for ndim in 1:4, sz in SIZES_BY_NDIM[ndim], width in WIDTHS, dim in 1:ndim
+    sz >= width && push!(configs, (ndim=ndim, width=width, dim=dim, sz=sz))
+end
+println("  $(length(configs)) configurations × $NRUNS runs = $(length(configs)*NRUNS) calls\n")
 
-for ndim in 1:4
-    results[ndim] = Dict()
-    for width in WIDTHS
-        results[ndim][width] = Dict()
-        for dim in 1:ndim
-            results[ndim][width][dim] = Float64[]
-        end
-    end
-    for sz in SIZES_BY_NDIM[ndim]
-        for width in WIDTHS
-            sz < width && continue
-            for dim in 1:ndim
-                print("  $(ndim)D  sz=$sz  width=$width  dim=$dim … ")
-                t = time_mul(sz, ndim, dim, width)
-                push!(results[ndim][width][dim], t)
-                @printf "%.2f μs\n" t*1e6
-            end
-        end
+# results[(ndim, width, dim, sz)] → timings collected across all passes
+timings = Dict{NTuple{4,Int}, Vector{Float64}}(
+    (cfg.ndim, cfg.width, cfg.dim, cfg.sz) => Float64[] for cfg in configs)
+
+for run in 1:NRUNS
+    println("Pass $run / $NRUNS …")
+    shuffle!(configs)
+    for cfg in configs
+        t     = time_mul(cfg.sz, cfg.ndim, cfg.dim, cfg.width)
+        total = cfg.sz ^ cfg.ndim
+        push!(timings[(cfg.ndim, cfg.width, cfg.dim, cfg.sz)], t)
+        @printf "  %dD  sz=%4d  width=%d  dim=%d  %6.2f μs  (%5.2f GEl/s)\n" cfg.ndim cfg.sz cfg.width cfg.dim t*1e6 total/t/1e9
     end
 end
 
@@ -67,56 +63,63 @@ end
 colors    = Makie.wong_colors()
 width_col = Dict(3 => colors[1], 5 => colors[2], 7 => colors[3])
 dim_style = [:solid, :dash, :dashdot, :dot]
+sups      = ["", "²", "³", "⁴"]
 
 fig = Figure(size=(1100, 900))
-Label(fig[0, :], "mul! wall time — DiffMatrix applied along each array axis";
-      fontsize=14, font=:bold)
+Label(fig[0, :],
+    "mul! throughput — DiffMatrix applied along each array axis" *
+    "\nGEl/s = 10⁹ array elements processed per second  (higher is better)";
+    fontsize=13, font=:bold)
 
 for ndim in 1:4
-    row = cld(ndim, 2)
-    col = isodd(ndim) ? 1 : 2
+    row       = cld(ndim, 2)
+    col       = isodd(ndim) ? 1 : 2
     all_sizes = SIZES_BY_NDIM[ndim]
+    sup       = sups[ndim]
 
     ax = Axis(fig[row, col];
         title   = "$(ndim)D array",
-        xlabel  = "Total elements",
-        ylabel  = "Time (μs)",
-        xscale  = log10,
-        yscale  = log10,
-        xtickformat = xs -> [@sprintf("%.0e", x) for x in xs])
+        xlabel  = "Array size",
+        ylabel  = "Throughput (GEl/s)",
+        xscale  = log2,
+        yscale  = log2,
+        xticks  = (Float64.(all_sizes), ["$sz$sup" for sz in all_sizes]),
+        xticklabelrotation = π/4,
+        yticks  = [2.0^i for i in -2:7],
+        ytickformat = ys -> [@sprintf("%g", y) for y in ys])
 
     for width in WIDTHS
-        # Only use sizes that are valid for this width
-        valid_sizes   = [sz for sz in all_sizes if sz >= width]
+        valid_sizes    = [sz for sz in all_sizes if sz >= width]
         total_elements = [sz^ndim for sz in valid_sizes]
         for dim in 1:ndim
-            ts = results[ndim][width][dim]
-            lines!(ax, total_elements, ts .* 1e6;
+            ts         = [median(timings[(ndim, width, dim, sz)]) for sz in valid_sizes]
+            throughput = total_elements ./ ts ./ 1e9
+            lines!(ax, Float64.(valid_sizes), throughput;
                 color     = width_col[width],
                 linestyle = dim_style[dim],
                 linewidth = 1.5)
-            scatter!(ax, total_elements, ts .* 1e6;
-                color     = width_col[width],
+            scatter!(ax, Float64.(valid_sizes), throughput;
+                color      = width_col[width],
                 markersize = 5)
         end
     end
 end
 
-# Legend: colors = stencil width, linestyles = differentiation direction
+# Legend: colour = stencil width, linestyle = differentiation direction
 width_elems = [LineElement(color=width_col[w], linewidth=2) for w in WIDTHS]
 dim_elems   = [LineElement(color=:black, linestyle=dim_style[d], linewidth=2) for d in 1:4]
 
-Legend(fig[3, 1],
-    width_elems, ["width $w" for w in WIDTHS];
-    orientation=:horizontal, framevisible=false, tellwidth=false,
-    title="Stencil width")
+Legend(fig[3, 1], width_elems, ["width $w" for w in WIDTHS];
+    orientation=:horizontal, framevisible=false, tellwidth=false, title="Stencil width")
 
-Legend(fig[3, 2],
-    dim_elems, ["dim $d" for d in 1:4];
-    orientation=:horizontal, framevisible=false, tellwidth=false,
-    title="Differentiation direction")
+Legend(fig[3, 2], dim_elems, ["dim $d" for d in 1:4];
+    orientation=:horizontal, framevisible=false, tellwidth=false, title="Differentiation direction")
 
-outdir = joinpath(@__DIR__, "..", "docs", "src", "assets", "benchmarks")
+cpu    = Sys.cpu_info()[1].model
+mem_gb = round(Int, Sys.total_memory() / 2^30)
+Label(fig[4, :], "CPU: $cpu  |  RAM: $(mem_gb) GB"; fontsize=9, color=:gray50)
+
+outdir  = joinpath(@__DIR__, "..", "docs", "src", "assets", "benchmarks")
 mkpath(outdir)
 outfile = joinpath(outdir, "matmul.svg")
 save(outfile, fig)
