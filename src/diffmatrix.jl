@@ -1,7 +1,7 @@
 """
     DiffMatrix{T, WIDTH, OPTIMISE} <: AbstractMatrix{T}
 
-Compact representation of a banded finite-difference differentiation matrix
+Compact representation of a banded NxN  finite-difference differentiation matrix
 with stencil width `WIDTH`.
 
 Coefficients are stored in a flat vector `coeffs` of length `N*WIDTH`: for output
