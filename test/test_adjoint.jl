@@ -112,6 +112,7 @@ end
 
         # Dp should be an AdjointDiffMatrix
         @test Dp isa AdjointDiffMatrix{Float64, width}
+        @test adjoint(Dp) === D
 
         # action on a random vector: Dp*x ≈ (1/w) .* (full(D)' * (w .* x))
         x     = randn(M)
@@ -121,6 +122,14 @@ end
         y_ref = (1 ./ w) .* (full(D)' * (w .* x))
 
         @test y_Dp ≈ y_ref
+
+        # scalar indexing and dense expansion should reflect the weighted
+        # adjoint coefficients, not merely the unweighted transpose.
+        Dp_full_ref = Diagonal(1 ./ w) * full(D)' * Diagonal(w)
+        @test full(Dp) ≈ Dp_full_ref
+        for i in 1:M, j in 1:M
+            @test Dp[i, j] ≈ Dp_full_ref[i, j]
+        end
 
         # unweighted adjoint is the w=1 special case
         At   = adjoint(D)

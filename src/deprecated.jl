@@ -11,6 +11,11 @@ Return grid points only. Preserved for backward compatibility.
 
 Deprecated: use `grid(M, l, h, MappedGrid(α)).xs` instead. Use `grid` directly
 when both points and quadrature weights are needed.
+
+# Examples
+```julia
+xs = grid(32, -1, 1, MappedGrid(0.5)).xs
+```
 """
 function gridpoints(M::Int, l::Real = -1.0, h::Real = 1.0, α::Real = 0.5)
     Base.depwarn("gridpoints is deprecated; use grid(M, l, h, MappedGrid(α)).xs instead", :gridpoints)
@@ -26,6 +31,11 @@ Return grid points only for the given distribution.
 
 Deprecated: use `grid(M, l, h, dist).xs` instead. Use `grid` directly when both
 points and quadrature weights are needed.
+
+# Examples
+```julia
+xs = grid(32, -1, 1, GaussLobattoGrid()).xs
+```
 """
 function gridpoints(M::Int, l::Real, h::Real, dist::AbstractGridDistribution)
     Base.depwarn("gridpoints is deprecated; use grid(M, l, h, dist).xs instead", :gridpoints)
@@ -50,6 +60,12 @@ Deprecated: use `grid(M, l, h, dist).ws` instead.
 # Arguments
 - `xs`: Mesh points. Need not be sorted; decreasing inputs are handled internally.
 - `order`: Polynomial degree of the local rule (1 = trapezoidal, 2 = Simpson, …).
+
+# Examples
+```julia
+g  = grid(32, -1, 1, MappedGrid(0.5, 4))
+ws = g.ws
+```
 """
 function quadweights(xs::AbstractVector, order::Int)
     Base.depwarn("quadweights is deprecated; use grid(M, l, h, dist).ws instead", :quadweights)
@@ -94,6 +110,15 @@ function _quadweights(xs::AbstractVector)
     return _quadweights_impl(xs)
 end
 
+"""
+    _quadweights_impl(xs) -> Vector
+
+Quiet implementation shared by the deprecated public quadrature wrappers.
+
+Solves the Vandermonde moment-matching system for one panel. This helper is not
+exported and deliberately emits no deprecation warning, so `quadweights` can use
+it internally without warning once per panel.
+"""
 function _quadweights_impl(xs::AbstractVector)
     N = length(xs)
     b = [(xs[end]^(d + 1) - xs[1]^(d + 1)) / (d + 1) for d in 0:N-1]
