@@ -1,11 +1,11 @@
 # Benchmarks
 
-The scripts in `benchmarks/` measure the two performance-critical operations
-in FDGrids: linear solves and matrix–vector products.  Run them with Julia 1.11
-or later; each script saves an SVG to `docs/src/assets/benchmarks/`.
+The scripts in `benchmarks/` measure the two performance-critical operations in
+`FDGrids.jl`: compact linear solves and dimension-wise multiplication. Each
+script writes an SVG under `docs/src/assets/benchmarks/`.
 
 ```bash
-# One-time setup (from the package root)
+# One-time setup from the package root
 julia --project=benchmarks -e '
     using Pkg
     Pkg.develop(path=".")
@@ -16,21 +16,28 @@ julia --project=benchmarks benchmarks/matmul.jl
 julia --project=benchmarks benchmarks/adjoint.jl
 ```
 
-The figures embed the CPU model and available RAM of the machine they were run on.
+The figures embed the CPU model and available RAM of the machine used to run
+the benchmark. Treat absolute timings as machine-specific; use trends and
+relative comparisons to understand implementation tradeoffs.
 
-## Linear solve
+## Linear Solve
 
-Compares three solve paths on a 1D grid, sweeping over grid sizes N = 16 … 2048
-and stencil widths 3, 5, 7.  Each timing is the **median** of 300 samples.
+This benchmark compares the three solve paths documented in
+[Linear Solves](linear-solves.md):
 
 | Path | Implementation |
 |------|----------------|
-| **LAPACK** | `lu(D)` → `DiffMatrixLU` → `ldiv!` via `dgbtrf!`/`dgbtrs!` (pivoted banded LU) |
-| **FDGrids** | `lu!(copy(D))` → `@generated ldiv!` (compile-time-unrolled, no pivoting) |
-| **Generic** | same in-place factorisation, dispatched through plain scalar loops |
+| **LAPACK** | `lu(D)` to `DiffMatrixLU`, then `ldiv!` via `gbtrf!`/`gbtrs!` with pivoting. |
+| **FDGrids** | `lu!(copy(D))`, then generated compact `ldiv!`, no pivoting. |
+| **Generic** | Same no-pivot banded algorithm using ordinary scalar indexing. |
 
-The left panel shows absolute solve time; the right panel shows the speedup of
-the FDGrids path over LAPACK.
+The sweep uses grid sizes `N = 16:2048` and stencil widths `3`, `5`, and `7`.
+Each timing is the median of 300 samples.
+
+The left panel shows absolute solve time. The right panel shows speedup of the
+compact FDGrids path over LAPACK. The comparison is not only an algorithmic
+comparison: LAPACK pivots and uses its own banded workspace, while the compact
+path avoids conversion and keeps factors inside `DiffMatrix` storage.
 
 ```@raw html
 <img src="../../assets/benchmarks/linsolve_speedup.svg"
@@ -38,22 +45,22 @@ the FDGrids path over LAPACK.
      style="width:100%; max-width:900px;" />
 ```
 
-## Matrix–vector product
+## Matrix-Vector Product
 
-Benchmarks `mul!(y, D, x, Val(dim))` across:
+This benchmark measures `mul!(y, D, x, Val(dim))` across:
 
-- Array dimensions N = 1, 2, 3, 4 (square arrays, same size along every axis)
-- Differentiation directions `dim` = 1 … N
-- Stencil widths 3, 5, 7
+- array ranks `1`, `2`, `3`, and `4`,
+- square arrays with the same size along every axis,
+- differentiation directions `dim = 1:rank`,
+- stencil widths `3`, `5`, and `7`.
 
-To reduce the influence of thermal throttling and cache-state bias, all
-`(N, width, dim, size)` combinations are shuffled into a random order and the
-full sweep is repeated 10 times.  The **median** over those 10 runs is plotted.
+To reduce thermal and cache-order bias, all `(rank, width, dim, size)`
+combinations are shuffled and the full sweep is repeated 10 times. The plotted
+value is the median over those passes.
 
-The x-axis shows the per-axis array size (e.g. 64² means a 64×64 array).
-Throughput is reported in **GEl/s** (giga-elements per second): total array
-elements divided by median wall time.  Higher is better.  Line colour encodes
-stencil width; line style encodes the differentiation direction.
+Throughput is reported in **GEl/s**: total array elements divided by median wall
+time. Higher is better. Color encodes stencil width; line style encodes the
+differentiation direction.
 
 ```@raw html
 <img src="../../assets/benchmarks/matmul.svg"
@@ -61,25 +68,24 @@ stencil width; line style encodes the differentiation direction.
      style="width:100%; max-width:1100px;" />
 ```
 
-## Forward vs adjoint
+## Forward vs Adjoint
 
-Measures the speedup of `mul!(y, adjoint(D), x, Val(dim))` relative to the
-forward `mul!(y, D, x, Val(dim))`, defined as **forward time / adjoint time**.
-A value above 1 means the adjoint is faster; below 1 it carries overhead.
-A dashed line at 1 marks parity.
+This benchmark compares `mul!(y, adjoint(D), x, Val(dim))` with the forward
+operator. The plotted value is
 
-The same array dimensions, stencil widths, and size ranges as the matrix–vector
-product benchmark are used, with the same randomised 10-pass median methodology.
-Colour encodes stencil width; line style encodes differentiation direction.
+```math
+\frac{\text{forward time}}{\text{adjoint time}}.
+```
 
-The adjoint is expected to be close to, but slightly slower than, the forward
-operator.  The centered body loop is the same fixed-width generated stencil as
-the forward path, so it runs at parity.  The small overhead comes from the
-adjoint boundary rows: their compact storage has variable-length head and tail
-regions, so those rows need extra pointer arithmetic and a short runtime loop
-instead of the fully unrolled fixed-width boundary stencil used by the forward
-operator.  The effect is most visible when many short fibres are differentiated,
-because each fibre pays that boundary cost.
+A value above `1` means the adjoint is faster; a value below `1` means the
+adjoint is slower. The dashed line marks parity.
+
+The adjoint should be close to the forward path because the centered body loop
+uses the same fixed-width generated stencil. A small overhead is expected near
+boundaries: adjoint head and tail rows have variable-length compact storage,
+extra pointer arithmetic, and a short runtime loop. The effect is most visible
+when many short fibers are differentiated, because each fiber pays the boundary
+cost.
 
 ```@raw html
 <img src="../../assets/benchmarks/adjoint.svg"

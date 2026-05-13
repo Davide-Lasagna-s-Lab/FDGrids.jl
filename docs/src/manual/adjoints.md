@@ -1,6 +1,8 @@
 # Adjoints
 
-`FDGrids.jl` provides ordinary and weighted adjoints for `DiffMatrix`.
+`FDGrids.jl` provides compact ordinary and weighted adjoints for `DiffMatrix`.
+Use this page for the public workflow. The storage layout is described in
+[Internal Layout and Kernels](internals.md#Adjoint-Operator-Layout).
 
 ## Ordinary Adjoint
 
@@ -8,9 +10,7 @@
 Dt = adjoint(D)
 ```
 
-constructs an `AdjointDiffMatrix` representing `transpose(D)`. The adjoint
-operator has its own compact coefficient storage, arranged for efficient
-`mul!` application.
+constructs an `AdjointDiffMatrix` representing `transpose(D)`.
 
 ```@example adjoints
 using FDGrids
@@ -38,11 +38,11 @@ full(Dt) ≈ full(D)'
 
 ## Weighted Adjoint
 
-Finite-difference operators are often paired with quadrature weights. Given
-positive weights `w` and `W = Diagonal(w)`, the weighted adjoint is
+With positive quadrature weights `w` and `W = Diagonal(w)`, the weighted
+adjoint is
 
 ```math
-D^+ = W^{-1} D^T W.
+D^+ = W^{-1}D^T W.
 ```
 
 It is constructed with:
@@ -51,16 +51,8 @@ It is constructed with:
 Dp = adjoint(D, w)
 ```
 
-The weights are folded into the stored coefficients, so applying `Dp` does not
-need to form or multiply by dense diagonal matrices.
-
-## Weighted Identity
-
-The weighted adjoint satisfies:
-
-```math
-(Du)^T W v = u^T W (D^+v).
-```
+This is the natural adjoint for the weighted inner product defined by the grid
+weights.
 
 ```@example adjoints
 w  = g.ws
@@ -79,7 +71,10 @@ mul!(Dpv, Dp, v)
 (Du' * W * v) ≈ (u' * W * Dpv)
 ```
 
-The dense reference expression is:
+The weights are folded into the stored coefficients, so applying `Dp` does not
+form or multiply by dense diagonal matrices.
+
+For a dense reference:
 
 ```@example adjoints
 Dp_dense = Diagonal(1 ./ w) * full(D)' * Diagonal(w)
@@ -94,8 +89,22 @@ full(Dp) ≈ Dp_dense
 adjoint(Dp) === D
 ```
 
-For an ordinary adjoint this agrees with the usual double-adjoint identity. For
-a weighted adjoint it is a structural unwrap, not the Euclidean adjoint of
-`W^{-1} D^T W`.
+For an ordinary adjoint this agrees with the usual double-adjoint intuition.
+For a weighted adjoint it is a structural unwrap, not the Euclidean adjoint of
+`W^{-1}D^T W`.
 
-See the [API Reference](../api.md#Adjoints) for docstrings and signatures.
+## When To Use Weighted Adjoints
+
+Use `adjoint(D, g.ws)` when inner products in your discretization are meant to
+approximate integrals:
+
+```math
+\langle u,v\rangle_W = u^T W v.
+```
+
+For positive weights, prefer `GaussLobattoGrid()` or `UniformGrid()`. Some
+`MappedGrid` Newton-Cotes weights can be negative on strongly non-uniform grids,
+which makes them unsuitable for a positive definite inner product.
+
+See [Numerical Methods](methods.md#Adjoints) for the mathematical identity and
+the [API Reference](../api.md#Adjoints) for signatures.

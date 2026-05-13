@@ -1,30 +1,32 @@
 # Decomposed Domains
 
-The ordinary dimension-wise interface
+The normal call
 
 ```julia
 mul!(y, D, x, Val(DIM))
 ```
 
-assumes that `x` and `y` contain the full differentiated dimension. For
-distributed arrays or slab-local storage, `FDGrids.jl` also provides a
-lower-level interface:
+assumes that `x` and `y` contain the full differentiated dimension. If a solver
+stores only a slab of the global domain plus halo points, use the lower-level
+call:
 
 ```julia
 mul!(y_local, D, x_local, Val(DIM), global_idx, local_rng)
 ```
 
-This applies the global operator `D` to a local array.
+This page documents only the indexing contract. Communication and halo exchange
+remain the responsibility of the caller.
 
-## Arguments
+## Contract
 
-- `DIM` is the local array dimension being differentiated.
-- `global_idx` is the global row index corresponding to local index `1`.
-- `local_rng` selects the local rows to compute along dimension `DIM`.
+- `DIM` is the local array dimension corresponding to the global grid of `D`.
+- `global_idx` is the global row index represented by local index `1`.
+- `local_rng` selects the local rows to compute.
+- `x_local` must already contain every value touched by the stencils for
+  `local_rng`.
 
-The method does not communicate halo values. A domain-decomposition layer must
-ensure that `x_local` contains all values required by the stencils in
-`local_rng`.
+Only entries selected by `local_rng` are meaningful outputs. Other entries of
+`y_local` are left to the caller's storage convention.
 
 ## Slab with Halo Points
 
@@ -58,12 +60,12 @@ mul!(y_local, D, x_local, Val(1), first(stored), local_owned)
 size(y_local)
 ```
 
-Only the rows in `local_owned` are meaningful outputs from this call. The halo
-rows in `y_local` are just storage.
+The call computes the global rows `17:32` using storage whose local index `1`
+corresponds to global row `15`.
 
 ## Decomposed Direction on Another Axis
 
-The decomposed direction does not need to be the first local array dimension:
+The decomposed direction does not need to be local dimension `1`:
 
 ```@example decomposed
 x_local_2 = randn(ny, length(stored))
@@ -74,15 +76,20 @@ mul!(y_local_2, D, x_local_2, Val(2), first(stored), local_owned)
 size(y_local_2)
 ```
 
-This is the same global operation, but with the differentiated index stored
-along local dimension `2`.
+This is the same global operation, but the differentiated index is stored along
+local dimension `2`.
 
-## Boundary Workflows
+## Boundary and Halo Strategy
 
-If a local array does not contain enough halo values, restrict `local_rng` to
-the rows whose stencil support is local. Boundary or overlap rows can then be
-filled by another communication/computation step.
+If a slab does not contain enough halo values for every owned row, restrict
+`local_rng` to the rows whose stencil support is available. Boundary or overlap
+rows can then be computed after communication, copied from neighbors, or handled
+by another layer of the solver.
 
-The interface deliberately leaves communication policy outside `FDGrids.jl`.
-That keeps the finite-difference kernels reusable across threaded, MPI, GPU, or
-custom slab-storage implementations.
+`FDGrids.jl` deliberately does not prescribe whether that layer is MPI,
+threaded shared memory, GPU exchange, or custom slab storage. The only
+requirement is that `x_local`, `global_idx`, and `local_rng` satisfy the
+contract above.
+
+For the pointer arithmetic used by this method, see
+[Internal Layout and Kernels](internals.md#Decomposed-Domain-Pointers).

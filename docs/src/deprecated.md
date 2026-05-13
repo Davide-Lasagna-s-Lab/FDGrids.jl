@@ -4,6 +4,8 @@ These functions are retained for compatibility with older `FDGrids.jl` code.
 New code should use [`grid`](@ref), [`DiffMatrix`](@ref), and the standard
 `LinearAlgebra` methods documented in the main [API Reference](api.md).
 
+The deprecated functions still work, but they emit deprecation warnings.
+
 ## Grid Points
 
 `gridpoints` returns only grid points. Prefer `grid(...).xs`, which keeps points
@@ -22,4 +24,3 @@ gridpoints
 quadweights
 _quadweights
 ```
-

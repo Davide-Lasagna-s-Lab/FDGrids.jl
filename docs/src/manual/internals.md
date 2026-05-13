@@ -10,6 +10,39 @@ The two central types are [`DiffMatrix`](@ref) and [`AdjointDiffMatrix`](@ref).
 They use different coefficient layouts because applying a forward
 finite-difference matrix row-by-row is different from applying its transpose.
 
+## Type Parameters and Invariants
+
+The concrete forward type is
+
+```julia
+DiffMatrix{T, WIDTH, OPTIMISE}
+```
+
+where:
+
+- `T` is the coefficient element type,
+- `WIDTH` is the odd stencil width,
+- `OPTIMISE` controls whether compact LU stores the diagonal of `U` inverted.
+
+The stencil width is a type parameter, not a runtime field. This is what lets
+generated kernels emit a fixed number of multiply-add operations for each
+interior stencil. The main invariants are:
+
+1. `WIDTH` is odd and at least `3`.
+2. `length(D.coeffs) == size(D, 1) * WIDTH`.
+3. Each logical row of a `DiffMatrix` owns exactly `WIDTH` stored entries.
+4. Entries outside a row's stored stencil are structural zeros.
+
+The adjoint type is
+
+```julia
+AdjointDiffMatrix{T, WIDTH}
+```
+
+and stores a reference to the parent `DiffMatrix` plus an output-major
+coefficient vector for the transposed action. Unlike `DiffMatrix`, the adjoint
+storage has variable-length boundary rows.
+
 ## Forward Operator Layout
 
 A `DiffMatrix` represents an `N × N` banded finite-difference matrix with a
@@ -56,6 +89,23 @@ D_{i,\mathrm{left}(i)+k-1} = D.\mathrm{coeffs}_{p_i+k-1},
 ```
 
 All other entries in row `i` are structural zeros.
+
+## Indexing and Mutation
+
+Scalar indexing reconstructs the dense interpretation on demand. For a logical
+entry `(i, j)`, the implementation computes the row-local stencil coordinate
+`m`. If `m` is between `1` and `WIDTH`, the corresponding stored coefficient is
+returned; otherwise the value is `zero(T)`.
+
+`setindex!` uses the same mapping. Assignments inside the stored stencil mutate
+the compact coefficient vector. Assignments outside the stored stencil are
+ignored, because the compact layout has no storage location for them. This is
+important when imposing boundary conditions: overwriting a row can only change
+entries already represented by that row's band.
+
+For example, the first row of a width-5 matrix stores columns `1:5`, so
+`D[1, 1] = 1` is stored but `D[1, 10] = 1` is ignored. This keeps the matrix
+layout fixed and predictable, but it means `setindex!` cannot widen the band.
 
 ## Example: Width 5
 
@@ -152,6 +202,37 @@ end
 The actual generated expression also handles head/body/tail regions and
 decomposed-domain local ranges.
 
+## Generated Loop Structure
+
+The generated multiplication code is assembled from small expression builders:
+
+- `_make_ref` emits array indexing expressions with the differentiated index
+  replaced by a stencil expression.
+- `_make_kernel_fixed` emits an unrolled fixed-width dot product.
+- `_make_kernel_variable` emits the short variable-length adjoint boundary
+  dot product.
+- `_make_loop_expr_forward` and `_make_loop_expr_adjoint` wrap those kernels in
+  the loop nest for the requested array rank and differentiated dimension.
+
+Loop ordering is chosen so dimensions before `DIM` are nested inside the
+differentiated loop, while dimensions after `DIM` are outside it. Conceptually,
+for rank `N`, every non-`DIM` coordinate identifies one fiber, and the
+generated code applies the same one-dimensional operator to that fiber.
+
+The forward body is the simplest region:
+
+```julia
+base = i - HWIDTH
+y[...] = dot(A.coeffs[ptr:ptr+WIDTH-1], x[base:base+WIDTH-1, ...])
+ptr += WIDTH
+```
+
+The adjoint body has the same fixed-width structure. The adjoint head and tail
+are different because the number of contributing forward rows grows and shrinks
+near the boundaries. Those regions use variable-length inner loops and more
+pointer arithmetic. This is why the adjoint benchmark is close to, but usually
+slightly slower than, the forward benchmark when boundary work is visible.
+
 ## Decomposed-Domain Pointers
 
 The lower-level multiplication method:
@@ -235,6 +316,25 @@ The head formula sums the growing row lengths. The body formula works because
 all previous body outputs have exactly `WIDTH` coefficients. The tail formula
 sums the shrinking row lengths.
 
+## Adjoint Construction
+
+The adjoint coefficient builder loops over adjoint outputs `j`, which are
+columns of the parent forward matrix. For each output, it visits only the
+forward rows that can contain column `j`. The stored coefficient is the dense
+transpose entry, optionally scaled for a weighted inner product:
+
+```math
+A^+_{j,i} = D_{i,j}\frac{w_i}{w_j}.
+```
+
+For the unweighted adjoint, `w_i/w_j = 1`. For the weighted adjoint, the
+scaling is applied once during construction, so `mul!` does not need to touch
+the weight vector.
+
+The construction requires `N > 2*WIDTH` because the adjoint storage layout has
+a head, a body, and a tail. Without a body region the pointer formulas and
+generated multiplication assumptions are not valid.
+
 ## Weighted Adjoint Coefficients
 
 For a weighted inner product with `W = Diagonal(w)`, the weighted adjoint is:
@@ -251,6 +351,29 @@ D_{i,j}\frac{w_i}{w_j}.
 
 This factor is inserted once when constructing `adjoint(D, w)`. Multiplication
 then uses the same adjoint kernel as the unweighted case.
+
+## Compact LU Storage
+
+The compact linear-solve path reuses the `DiffMatrix` coefficient vector for
+the LU factors. After `lu!(D)`, the stored band no longer represents a
+differentiation matrix:
+
+- entries below the diagonal inside the band store the multipliers of the
+  unit-lower triangular factor `L`,
+- the diagonal and upper-band entries store `U`,
+- if `OPTIMISE=true`, the diagonal entries of `U` are replaced by their
+  reciprocals.
+
+The generated triangular solvers in `src/linalg.jl` specialize on `WIDTH`.
+Their interior loops directly index the compact coefficient vector and unroll
+the known number of subdiagonal or superdiagonal updates. Boundary rows use
+ordinary indexing because the available band width changes near the matrix
+ends.
+
+This compact solve path deliberately does not pivot. Pivoting would require row
+interchanges and potentially different fill patterns, which do not fit the
+fixed row layout. The pivoted reference path therefore converts to LAPACK's
+banded workspace and stores a pivot vector separately.
 
 ## Source-Code Guide
 
@@ -271,4 +394,3 @@ When extending the package, keep these invariants in mind:
 4. `global_idx` always refers to local index `1` in decomposed-domain kernels.
 5. `full(A)` and scalar indexing should agree with `mul!` semantics, including
    weighted adjoints.
-

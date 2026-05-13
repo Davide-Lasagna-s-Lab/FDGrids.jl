@@ -1,46 +1,47 @@
 # Scope and Limitations
 
-`FDGrids.jl` is deliberately narrow: it builds compact one-dimensional
-finite-difference operators and applies them efficiently to vectors or to fibers
-of higher-dimensional arrays.
+`FDGrids.jl` is a compact finite-difference building block, not a full PDE
+framework. It focuses on one-dimensional differentiation matrices that can be
+reused efficiently across vectors and array fibers.
 
-It is a good fit when you already know the grid direction, stencil width, and
-boundary treatment you want, and you need to apply the same operator many times
-inside a solver, stability calculation, or time-stepping loop.
-
-## What the Package Provides
+## Designed For
 
 - Non-uniform finite-difference coefficients from Fornberg's algorithm.
 - Compact `DiffMatrix` storage with fixed-width row stencils.
 - Generated `mul!` kernels for vectors and arrays of arbitrary rank.
 - Ordinary and weighted adjoints without forming dense matrices.
-- Grid constructors with matching quadrature weights.
-- Compact no-pivot banded LU routines for repeated solves.
-- Lower-level hooks for slab-local or decomposed-domain storage.
+- Grid constructors with quadrature weights that match the node distribution.
+- Compact no-pivot banded LU for repeated solves.
+- Slab-local multiplication when an external code manages halo values.
 
-## What It Does Not Try to Be
+This makes the package a good fit for stability calculations, collocation or
+finite-difference boundary value problems, and time-stepping codes that already
+own their state arrays and boundary-condition logic.
 
-`FDGrids.jl` is not a full PDE framework. In particular, it does not currently
-provide:
+## Not Provided
 
-- time integrators,
+The package intentionally leaves these layers to user code or companion
+packages:
+
 - boundary-condition objects,
+- time integrators,
 - multi-dimensional operator assembly,
 - automatic halo exchange,
-- GPU kernels,
 - sparse-matrix conversion helpers,
-- periodic grids or periodic stencils,
-- adaptive grids,
-- interpolation/resampling between grids.
+- periodic grids and periodic stencils,
+- adaptive or moving grids,
+- interpolation between grids,
+- GPU kernels.
 
-Those are natural layers to build on top of the current package, but keeping
-them separate helps the core stay small and predictable.
+The important consequence is that `FDGrids.jl` gives you fast local operators,
+but it does not decide the physics or communication pattern of a larger solver.
 
-## Recommended Reading Order
+## Reading Path
 
 Start with [Grids and Quadrature](grids.md) and
-[Finite-Difference Operators](diffmatrix.md). Then read [Adjoints](adjoints.md)
-if you use quadrature-weighted inner products,
-[Decomposed Domains](decomposed-domains.md) if you own halo management outside
-the package, and [Linear Solves](linear-solves.md) if you solve banded systems
-with the compact operator.
+[Finite-Difference Operators](diffmatrix.md). Read [Adjoints](adjoints.md) if
+you use weighted inner products, [Linear Solves](linear-solves.md) if you need
+boundary value problems or compact LU, and [Decomposed Domains](decomposed-domains.md)
+if your arrays include halo storage. The mathematical and implementation
+details are separated into [Numerical Methods](methods.md) and
+[Internal Layout and Kernels](internals.md).

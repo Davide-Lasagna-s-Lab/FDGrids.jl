@@ -79,6 +79,25 @@ end
     end
 end
 
+@testset "boundary value problem example            " begin
+    M = 64
+    g = grid(M, -1, 1, GaussLobattoGrid())
+
+    L = DiffMatrix(g.xs, 7, 2)
+    L[1,   :] .= basis_vector(1, M)
+    L[end, :] .= basis_vector(M, M)
+
+    rhs = -(π^2) .* sin.(π .* g.xs)
+    rhs[1]   = 0
+    rhs[end] = 0
+
+    u = ldiv!(lu!(L), copy(rhs))
+
+    @test maximum(abs, u .- sin.(π .* g.xs)) < 1e-6
+    @test u[1] ≈ 0 atol=1e-14
+    @test u[end] ≈ 0 atol=1e-14
+end
+
 @testset "test BVP                                  " begin
     # solve u'' + u' = 1, with u(-1) = 2, u(1) = 0
 

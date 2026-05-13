@@ -6,25 +6,14 @@
 </p>
 ```
 
-`FDGrids.jl` provides compact finite-difference differentiation matrices on
-uniform and non-uniform grids. The same one-dimensional operator can be applied
-to vectors, matrices, and higher-dimensional arrays along any selected
-dimension.
+`FDGrids.jl` builds compact one-dimensional finite-difference operators on
+uniform and non-uniform grids. A single `DiffMatrix` can be applied to a vector
+or along any selected dimension of a higher-dimensional array.
 
-The package is useful when a PDE, stability, or time-stepping code repeatedly
-applies the same one-dimensional finite-difference operator to many fibers of an
-array. It stores only the local stencil coefficients and supplies generated
-`mul!` kernels for the common application paths.
-
-## Highlights
-
-- Finite-difference coefficients on arbitrary non-uniform nodes.
-- User-chosen odd stencil widths.
-- Dimension-wise `mul!` along any array axis.
-- Ordinary and weighted adjoint operators.
-- Grid constructors with matching quadrature weights.
-- Compact in-place LU factorisation and generated triangular solves.
-- Lower-level hooks for slab-local and decomposed-domain arrays.
+The package is aimed at solvers that repeatedly apply the same
+finite-difference operator to many array fibers. It stores only local stencil
+coefficients and uses generated kernels for the common multiplication and
+triangular-solve paths.
 
 ## Quick Example
 
@@ -42,27 +31,26 @@ mul!(du, D, u)
 du[1:3]
 ```
 
-`DiffMatrix` behaves like an `AbstractMatrix`, but the dense matrix is only
-formed when requested:
+`DiffMatrix` behaves like an `AbstractMatrix`, but the dense matrix is formed
+only when requested:
 
 ```@example quickstart
-M = full(D)
-du ≈ M * u
+du ≈ full(D) * u
 ```
 
-## Documentation Map
+## What To Read
 
-The manual is organized as a single path from basic usage to internals:
-
-- [Scope and Limitations](manual/scope.md)
-- [Grids and Quadrature](manual/grids.md)
-- [Finite-Difference Operators](manual/diffmatrix.md)
-- [Adjoints](manual/adjoints.md)
-- [Decomposed Domains](manual/decomposed-domains.md)
-- [Linear Solves](manual/linear-solves.md)
-- [Numerical Methods](manual/methods.md)
-- [Internal Layout and Kernels](manual/internals.md)
-- [Benchmarks](manual/benchmarks.md)
+| Page | Use it for |
+|------|------------|
+| [Scope and Limitations](manual/scope.md) | What the package does and deliberately does not do. |
+| [Grids and Quadrature](manual/grids.md) | Choosing grid distributions and paired quadrature weights. |
+| [Finite-Difference Operators](manual/diffmatrix.md) | Constructing and applying `DiffMatrix` objects. |
+| [Adjoints](manual/adjoints.md) | Ordinary and weighted adjoints. |
+| [Linear Solves](manual/linear-solves.md) | Compact banded LU, pivoting, and boundary value problems. |
+| [Decomposed Domains](manual/decomposed-domains.md) | Applying operators to slab-local arrays with halos. |
+| [Numerical Methods](manual/methods.md) | The algorithms and mathematical assumptions. |
+| [Internal Layout and Kernels](manual/internals.md) | Storage layouts, generated kernels, and implementation invariants. |
+| [Benchmarks](manual/benchmarks.md) | Performance methodology and results. |
 
 For function signatures and docstrings, see the [API Reference](api.md).
 
@@ -72,17 +60,3 @@ For function signatures and docstrings, see the [API Reference](api.md).
 using Pkg
 Pkg.add(url = "https://github.com/Davide-Lasagna-s-Lab/FDGrids.jl")
 ```
-
-## References
-
-- B. Fornberg, "Generation of Finite Difference Formulas on Arbitrarily Spaced
-  Grids", *Mathematics of Computation*, 51(184), 699-706, 1988.
-- B. Fornberg, *A Practical Guide to Pseudospectral Methods*, Cambridge
-  University Press, 1998.
-- J. M. López, D. Feldmann, M. Rampp, A. Vela-Martín, L. Shi, and M. Avila,
-  "nsCouette: A High-Performance Code for Direct Numerical Simulations of
-  Turbulent Taylor-Couette Flow", *SoftwareX*, 11, 100395, 2020.
-- J. Waldvogel, "Fast Construction of the Fejér and Clenshaw-Curtis Quadrature
-  Rules", *BIT Numerical Mathematics*, 46, 195-202, 2006.
-- G. H. Golub and C. F. Van Loan, *Matrix Computations*, 4th edition, Johns
-  Hopkins University Press, 2013.

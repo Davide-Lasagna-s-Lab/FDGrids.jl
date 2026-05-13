@@ -1,7 +1,8 @@
 # API Reference
 
-This page collects the public API. Deprecated compatibility functions are
-listed separately in [Deprecated API](deprecated.md).
+This page collects public signatures and docstrings. For guidance and examples,
+start with the manual pages; this reference is intentionally terse. Deprecated
+compatibility functions are listed separately in [Deprecated API](deprecated.md).
 
 ## Grids
 

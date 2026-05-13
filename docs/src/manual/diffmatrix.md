@@ -1,12 +1,8 @@
 # Finite-Difference Operators
 
-`DiffMatrix` is a compact representation of a one-dimensional
-finite-difference differentiation matrix. It behaves like an `AbstractMatrix`,
-but it stores exactly `width` coefficients per row rather than a dense `N×N`
-matrix.
-
-Use it when the same derivative operator will be applied repeatedly to one
-vector or to many fibers of an array.
+`DiffMatrix` represents a one-dimensional finite-difference differentiation
+matrix in compact form. It behaves like an `AbstractMatrix`, but performance
+critical code should apply it with `mul!` rather than forming a dense matrix.
 
 ## Construction
 
@@ -14,12 +10,9 @@ vector or to many fibers of an array.
 D = DiffMatrix(xs, width, order)
 ```
 
-- `xs` are the grid points.
-- `width` is the odd stencil width.
-- `order` is the derivative order.
-
-The points may be non-uniform. They must be distinct, and their ordering must
-match the arrays to which the operator will be applied.
+- `xs`: grid points, ordered as they appear in the arrays being differentiated.
+- `width`: odd stencil width.
+- `order`: derivative order.
 
 ```@example diffmatrix
 using FDGrids
@@ -30,34 +23,32 @@ D = DiffMatrix(g.xs, 5, 1)
 size(D)
 ```
 
-This is a first-derivative operator with a five-point stencil. Interior rows
-use centered stencils; boundary rows shift the stencil inward while preserving
-the same width.
+The example constructs a first-derivative operator with a five-point stencil.
+Interior rows are centered; boundary rows use one-sided stencils of the same
+width.
 
-## Applying the Operator
-
-Use `mul!` in performance-sensitive code:
+## Applying to Vectors
 
 ```@example diffmatrix
 u = sin.(g.xs)
-y = similar(u)
+du = similar(u)
 
-mul!(y, D, u)
-y[1:3]
+mul!(du, D, u)
+du[1:3]
 ```
 
-For inspection, tests, or comparison with dense linear algebra, expand the
-operator:
+For debugging or tests, compare against the dense interpretation:
 
 ```@example diffmatrix
-y ≈ full(D) * u
+du ≈ full(D) * u
 ```
 
-`full(D)` allocates a dense matrix and should not be used inside hot loops.
+`full(D)` allocates and is not intended for hot loops.
 
 ## Wider Stencils and Higher Derivatives
 
-The same grid can be used with different stencil widths and derivative orders:
+The same nodes can be reused with a different stencil width or derivative
+order:
 
 ```@example diffmatrix
 D2 = DiffMatrix(g.xs, 7, 2)
@@ -67,23 +58,13 @@ mul!(d2u, D2, u)
 d2u[1:3]
 ```
 
-Wider stencils use more points per row and can improve accuracy for smooth
-functions, but they also increase bandwidth and halo requirements in
-decomposed-domain applications.
+Wider stencils use more points per row. They can improve accuracy for smooth
+functions, but they also increase bandwidth and halo requirements.
 
-## Dimension-Wise Differentiation
+## Applying Along an Array Dimension
 
-`DiffMatrix` is one-dimensional, but `mul!` can apply it along any dimension of
-an array:
-
-```julia
-mul!(y, D, x, Val(DIM))
-```
-
-The differentiated dimension must have length `size(D, 1)`. All other
-dimensions are treated as batch dimensions.
-
-### First Dimension
+`mul!(y, D, x, Val(DIM))` applies the same one-dimensional operator along
+dimension `DIM`; all other dimensions are batch dimensions.
 
 ```@example diffmatrix
 nx = 48
@@ -100,12 +81,7 @@ mul!(ux, Dx, u2, Val(1))
 size(ux)
 ```
 
-Each column is differentiated independently.
-
-### Other Dimensions
-
-If the grid direction is stored along another axis, change only the `Val`
-argument:
+If the differentiated coordinate is stored along another axis, change `Val`:
 
 ```@example diffmatrix
 u3 = [sin(x) * cos(y) for y in ys, x in g2.xs]
@@ -115,34 +91,17 @@ mul!(ux3, Dx, u3, Val(2))
 size(ux3)
 ```
 
-The same interface works for arrays with more dimensions:
+The differentiated dimension must have length `size(D, 1)`.
 
-```@example diffmatrix
-nz = 4
-u4 = [sin(x) * cos(y) * (1 + z)
-      for z in 1:nz, x in g2.xs, y in ys]
+## Mutating Entries
 
-ux4 = similar(u4)
-mul!(ux4, Dx, u4, Val(2))
+`DiffMatrix` has a fixed compact band layout. Assignments inside the stored
+stencil for a row mutate that row; assignments outside the stored stencil are
+ignored because there is no storage location for them. This matters when
+overwriting rows for boundary conditions. See
+[Linear Solves](linear-solves.md#Boundary-Value-Problem) for a complete
+example.
 
-size(ux4)
-```
-
-## Storage Layout
-
-For `N = length(xs)`, the coefficient vector has length `N * width`. Row `i`
-occupies:
-
-```math
-\mathrm{coeffs}[(i-1)\,\mathrm{width}+1 : i\,\mathrm{width}].
-```
-
-The logical dense matrix is banded. Entries outside the stored stencil are
-structural zeros.
-
-Boundary rows use shifted one-sided stencils of the same width as the centered
-interior stencils. This uniform row width is what allows the forward generated
-kernels to be simple and fast.
-
-See the [API Reference](../api.md#Finite-Difference-Matrices) for docstrings
-and signatures.
+For storage formulas and generated-kernel details, see
+[Internal Layout and Kernels](internals.md). For signatures, see the
+[API Reference](../api.md#Finite-Difference-Matrices).
