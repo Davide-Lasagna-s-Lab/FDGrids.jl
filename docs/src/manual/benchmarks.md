@@ -72,6 +72,15 @@ The same array dimensions, stencil widths, and size ranges as the matrix–vecto
 product benchmark are used, with the same randomised 10-pass median methodology.
 Colour encodes stencil width; line style encodes differentiation direction.
 
+The adjoint is expected to be close to, but slightly slower than, the forward
+operator.  The centered body loop is the same fixed-width generated stencil as
+the forward path, so it runs at parity.  The small overhead comes from the
+adjoint boundary rows: their compact storage has variable-length head and tail
+regions, so those rows need extra pointer arithmetic and a short runtime loop
+instead of the fully unrolled fixed-width boundary stencil used by the forward
+operator.  The effect is most visible when many short fibres are differentiated,
+because each fibre pays that boundary cost.
+
 ```@raw html
 <img src="../../assets/benchmarks/adjoint.svg"
      alt="Adjoint speedup over forward"
