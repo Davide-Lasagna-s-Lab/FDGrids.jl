@@ -7,8 +7,8 @@ mul!(y, D, x, Val(DIM))
 ```
 
 assumes that `x` and `y` contain the full differentiated dimension. For
-distributed arrays or slab-local storage, `FDGrids.jl` also provides a lower
-level interface:
+distributed arrays or slab-local storage, `FDGrids.jl` also provides a
+lower-level interface:
 
 ```julia
 mul!(y_local, D, x_local, Val(DIM), global_idx, local_rng)
@@ -86,4 +86,3 @@ filled by another communication/computation step.
 The interface deliberately leaves communication policy outside `FDGrids.jl`.
 That keeps the finite-difference kernels reusable across threaded, MPI, GPU, or
 custom slab-storage implementations.
-

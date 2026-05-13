@@ -52,22 +52,17 @@ du ≈ M * u
 
 ## Documentation Map
 
-The tutorials are the best place to start:
+The manual is organized as a single path from basic usage to internals:
 
-- [Getting Started](tutorials/getting-started.md)
-- [Dimension-Wise Differentiation](tutorials/dimension-wise.md)
-- [Weighted Adjoints](tutorials/weighted-adjoints.md)
-- [Decomposed Domains](tutorials/decomposed-domains.md)
-
-The manual pages give a more detailed account of the implementation and
-mathematics:
-
+- [Scope and Limitations](manual/scope.md)
 - [Grids and Quadrature](manual/grids.md)
 - [Finite-Difference Operators](manual/diffmatrix.md)
 - [Adjoints](manual/adjoints.md)
+- [Decomposed Domains](manual/decomposed-domains.md)
 - [Linear Solves](manual/linear-solves.md)
 - [Numerical Methods](manual/methods.md)
 - [Internal Layout and Kernels](manual/internals.md)
+- [Benchmarks](manual/benchmarks.md)
 
 For function signatures and docstrings, see the [API Reference](api.md).
 

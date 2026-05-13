@@ -18,16 +18,12 @@ makedocs(
     ),
     pages = [
         "Home" => "index.md",
-        "Tutorials" => [
-            "Getting Started" => "tutorials/getting-started.md",
-            "Dimension-Wise Differentiation" => "tutorials/dimension-wise.md",
-            "Weighted Adjoints" => "tutorials/weighted-adjoints.md",
-            "Decomposed Domains" => "tutorials/decomposed-domains.md",
-        ],
         "Manual" => [
+            "Scope and Limitations" => "manual/scope.md",
             "Grids and Quadrature" => "manual/grids.md",
             "Finite-Difference Operators" => "manual/diffmatrix.md",
             "Adjoints" => "manual/adjoints.md",
+            "Decomposed Domains" => "manual/decomposed-domains.md",
             "Linear Solves" => "manual/linear-solves.md",
             "Numerical Methods" => "manual/methods.md",
             "Internal Layout and Kernels" => "manual/internals.md",

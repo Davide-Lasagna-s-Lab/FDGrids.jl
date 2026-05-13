@@ -57,9 +57,18 @@ weighted adjoints.
 
 ## Examples
 
+Build a grid once, then reuse both its nodes and weights:
+
 ```@example grids
 using FDGrids
 
+g = grid(32, -1, 1, GaussLobattoGrid())
+(length(g.xs), length(g.ws), first(g.xs), last(g.xs))
+```
+
+The weights are paired with the nodes:
+
+```@example grids
 g = grid(64, -1, 1, GaussLobattoGrid())
 sum(exp.(g.xs) .* g.ws)
 ```
