@@ -27,7 +27,7 @@ This benchmark compares the three solve paths documented in
 
 | Path | Implementation |
 |------|----------------|
-| **LAPACK** | `lu(D)` to `DiffMatrixLU`, then `ldiv!` via `gbtrf!`/`gbtrs!` with pivoting. |
+| **LAPACK** | `lu(D)` to `DiffMatrixLULapack`, then `ldiv!` via `gbtrf!`/`gbtrs!` with pivoting. |
 | **FDGrids** | `lu!(copy(D))`, then generated compact `ldiv!`, no pivoting. |
 | **Generic** | Same no-pivot banded algorithm using ordinary scalar indexing. |
 

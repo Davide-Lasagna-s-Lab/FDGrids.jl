@@ -1,7 +1,7 @@
 # Benchmark: FDGrids compact linear solve vs LAPACK banded LU.
 #
 # Three solve paths are compared:
-#   LAPACK   — lu(D) → DiffMatrixLU → ldiv! via dgbtrf!/dgbtrs!
+#   LAPACK   — lu(D) → DiffMatrixLULapack → ldiv! via dgbtrf!/dgbtrs!
 #   FDGrids  — lu!(copy(D)) → DiffMatrix (factorised in-place) → @generated ldiv!
 #   Generic  — same factorisation but dispatched through plain scalar loops
 #

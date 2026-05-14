@@ -20,7 +20,7 @@ specialized for `DiffMatrix`.
 
 `lu(D::DiffMatrix)` expands the compact coefficients into LAPACK's general
 banded workspace and calls `LinearAlgebra.LAPACK.gbtrf!`. The returned
-`DiffMatrixLU` stores the LAPACK factor array and the pivot vector. Solves then
+`DiffMatrixLULapack` stores the LAPACK factor array and the pivot vector. Solves then
 call `gbtrs!`.
 
 This path is useful when pivoting is desired, or when comparing against a

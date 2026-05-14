@@ -45,7 +45,7 @@ LinearAlgebra.mul!(::AbstractArray{T, N}, ::AdjointDiffMatrix{TD, WIDTH}, ::Abst
 
 ```@docs
 LinearAlgebra.lu(::DiffMatrix)
-LinearAlgebra.ldiv!(::FDGrids.DiffMatrixLU{T, WIDTH}, ::AbstractVector{T}) where {T, WIDTH}
+LinearAlgebra.ldiv!(::FDGrids.DiffMatrixLULapack{T, WIDTH}, ::AbstractVector{T}) where {T, WIDTH}
 LinearAlgebra.lu!(::DiffMatrix)
 LinearAlgebra.ldiv!(::DiffMatrix, ::AbstractVector)
 banded_lu!

@@ -46,20 +46,20 @@ function to_banded_format(D::DiffMatrix{T, WIDTH}) where {T, WIDTH}
 end
 
 """
-    DiffMatrixLU{T, WIDTH, F}
+    DiffMatrixLULapack{T, WIDTH, F}
 
 LU factorisation of a `DiffMatrix` produced by `lu(D)`.
 
 `factors` stores LAPACK's banded LU array and `ipiv` stores the pivot vector.
 This type belongs to the LAPACK reference path.
 """
-struct DiffMatrixLU{T, WIDTH, F}
+struct DiffMatrixLULapack{T, WIDTH, F}
     factors::F
     ipiv::Vector{Int}
 end
 
 """
-    lu(D::DiffMatrix) -> DiffMatrixLU
+    lu(D::DiffMatrix) -> DiffMatrixLULapack
 
 Compute a pivoted banded LU factorisation of `D` using LAPACK.
 
@@ -73,13 +73,13 @@ in-place path `lu!(copy(D))` followed by `ldiv!(factorised_D, rhs)`.
 function LinearAlgebra.lu(D::DiffMatrix{T, WIDTH}) where {T, WIDTH}
     WD = WIDTH-1
     factors, ipiv = LinearAlgebra.LAPACK.gbtrf!(WD, WD, size(D, 2), to_banded_format(D))
-    return DiffMatrixLU{T, WIDTH, typeof(factors)}(factors, ipiv)
+    return DiffMatrixLULapack{T, WIDTH, typeof(factors)}(factors, ipiv)
 end
 
 """
-    ldiv!(lu::DiffMatrixLU, x) -> x
+    ldiv!(lu::DiffMatrixLULapack, x) -> x
 
-Solve the linear system represented by a `DiffMatrixLU` factorisation in place.
+Solve the linear system represented by a `DiffMatrixLULapack` factorisation in place.
 
 `x` is overwritten with the solution. The factorisation must have been produced
 by `lu(D)` for a compatible `DiffMatrix`.
@@ -87,7 +87,7 @@ by `lu(D)` for a compatible `DiffMatrix`.
 This solves through LAPACK's banded storage and is mainly a reference/comparison
 path for the compact generated implementation below.
 """
-function LinearAlgebra.ldiv!(lu::DiffMatrixLU{T, WIDTH}, x::AbstractVector{T}) where {T, WIDTH}
+function LinearAlgebra.ldiv!(lu::DiffMatrixLULapack{T, WIDTH}, x::AbstractVector{T}) where {T, WIDTH}
     WD = WIDTH-1
     return LinearAlgebra.LAPACK.gbtrs!('N', WD, WD, size(lu.factors, 2), lu.factors, lu.ipiv, x)
 end
