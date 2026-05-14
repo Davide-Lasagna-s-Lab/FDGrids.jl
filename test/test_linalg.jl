@@ -21,6 +21,60 @@
     end
 end
 
+@testset "test generic banded lu                    " begin
+    for M in (10, 100)
+        xs = gridpoints(M, -1, 1, 1)
+        for width in (3, 5, 7, 9)
+            WD = width - 1
+            D = DiffMatrix(xs, width, 2; optimise=false)
+            D[1,   :] .= [1, zeros(M-1)...]
+            D[end, :] .= [zeros(M-1)..., 1];
+
+            b = randn(M)
+
+            # reference: no-pivot LU on the dense matrix
+            luDfull = lu(FDGrids.full(D), NoPivot())
+            x_full  = ldiv!(luDfull, copy(b))
+
+            # generic banded path: lu!(AbstractMatrix, p, q) -> BandedMatrixLU
+            luBanded = lu!(FDGrids.full(D), WD, WD; check=false)
+            @test luBanded isa BandedMatrixLU
+            x_banded = ldiv!(luBanded, copy(b))
+            @test norm(x_banded - x_full)/M < 1e-12
+        end
+    end
+end
+
+@testset "test DiffMatrix lu                        " begin
+    for M in (10, 100)
+        xs = gridpoints(M, -1, 1, 1)
+        for width in (3, 5, 7, 9)
+            WD = width - 1
+            D = DiffMatrix(xs, width, 2; optimise=false)
+            D[1,   :] .= [1, zeros(M-1)...]
+            D[end, :] .= [zeros(M-1)..., 1];
+
+            b = randn(M)
+
+            # reference: no-pivot LU on the dense matrix
+            luDfull = lu(FDGrids.full(D), NoPivot())
+            x_full  = ldiv!(luDfull, copy(b))
+
+            # DiffMatrix compact path: lu!(DiffMatrix) -> DiffMatrixLU
+            luD = lu!(copy(D))
+            @test luD isa DiffMatrixLU
+
+            # factors match the dense no-pivot LU (optimise=false so diagonal not inverted)
+            luD1 = luDfull.L + luDfull.U - Diagonal(ones(M))
+            @test norm(luD1 - full(luD)) < 1e-8
+
+            # solve matches
+            x_compact = ldiv!(lu!(copy(D)), copy(b))
+            @test norm(x_compact - x_full)/M < 1e-12
+        end
+    end
+end
+
 @testset "test new lufact                           " begin
     for M in (10, 100)
         xs = gridpoints(M, -1, 1, 1)
@@ -70,8 +124,7 @@ end
             x_full = ldiv!(luDfull, copy(b))
 
             # factorise and solve using optimised routines
-            lu!(D)
-            x_banded = ldiv!(D, copy(b))
+            x_banded = ldiv!(lu!(D), copy(b))
 
             @test norm(x_full - x_banded)/M < 2e-13
             # @printf "%04d %04d %.5e\n" M width norm(x_full - x_banded)/M
