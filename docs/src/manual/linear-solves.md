@@ -13,14 +13,14 @@ specialized for `DiffMatrix`.
 | Path | Entry points | Purpose |
 |------|--------------|---------|
 | LAPACK banded | `lu(D)`, `ldiv!(F, rhs)` | Pivoted reference path using LAPACK `gbtrf!`/`gbtrs!`. |
-| Generic banded | `banded_lu!`, `banded_tril_solve!`, `banded_triu_solve` | Algorithmic reference implementation using ordinary matrix indexing. |
+| Generic banded | `lu!(A, p, q)`, `ldiv!(F, rhs)` | Algorithmic reference implementation using ordinary matrix indexing. |
 | Compact `DiffMatrix` | `lu!(D)`, `ldiv!(D, rhs)` | Performance path that keeps the LU factors in compact `DiffMatrix` storage. |
 
 ### LAPACK Banded Path
 
 `lu(D::DiffMatrix)` expands the compact coefficients into LAPACK's general
 banded workspace and calls `LinearAlgebra.LAPACK.gbtrf!`. The returned
-`DiffMatrixLU` stores the LAPACK factor array and the pivot vector. Solves then
+`DiffMatrixLULapack` stores the LAPACK factor array and the pivot vector. Solves then
 call `gbtrs!`.
 
 This path is useful when pivoting is desired, or when comparing against a
@@ -57,23 +57,17 @@ The generic routines are small no-pivot banded LU and triangular-solve
 implementations following the standard banded algorithm described by Golub and
 Van Loan. They operate on any `AbstractMatrix` using ordinary scalar indexing.
 
-`banded_lu!(A, p, q)` assumes that `A` has at most `p` subdiagonals and `q`
+`lu!(A, p, q)` assumes that `A` has at most `p` subdiagonals and `q`
 superdiagonals. It first checks that all entries outside those bands are zero,
 then overwrites `A` with the LU factors: the strict lower band stores the
 multipliers of the unit-lower factor `L`, while the diagonal and upper band
 store `U`.
 
-After factorisation, the reference solve is:
+After factorisation, pass the returned `BandedMatrixLU` to `ldiv!`:
 
 ```julia
-banded_tril_solve!(A, rhs, p)
-banded_triu_solve(A, rhs, q)
-```
-
-or equivalently:
-
-```julia
-ldiv!(A, rhs, p, q)
+F = lu!(A, p, q)
+ldiv!(F, rhs)
 ```
 
 These routines are intentionally simple. They are good for validation,
@@ -82,18 +76,21 @@ layout or generated kernels used by `DiffMatrix`.
 
 ### Compact `DiffMatrix` Path
 
-`lu!(D::DiffMatrix)` applies the same no-pivot banded factorisation directly to
-the compact coefficient storage. No dense matrix or LAPACK workspace is formed.
-The factors replace the original differentiation coefficients, so copy the
-operator first if it is still needed.
+`lu!(D::DiffMatrix)` applies a generated no-pivot banded LU factorisation
+directly to the compact coefficient storage and returns a `DiffMatrixLU`
+wrapping the factorised `DiffMatrix`. No dense matrix or LAPACK workspace is
+formed. The LU factors replace the original differentiation coefficients, so
+copy the operator first if it is still needed.
 
-`ldiv!(D, rhs)` then performs generated forward and backward substitution. The
-generated triangular solves specialize on the stencil width stored in the
-`DiffMatrix` type. Interior substitution work is emitted as fixed-width
-unrolled code, while boundary rows use scalar indexing. If the matrix was built
-with `optimise=true`, the diagonal of `U` is stored inverted during
-factorisation, so the back-substitution multiplies by the stored reciprocal
-instead of dividing.
+Both the factorisation kernel and the triangular-solve kernels access `A.coeffs`
+directly for interior rows, bypassing the boundary-adjusted `getindex`/`setindex!`
+arithmetic. The loops are unrolled on the stencil width at compile time. Head
+and tail rows use scalar indexing. If the matrix was built with `optimise=true`,
+the diagonal of `U` is stored inverted during factorisation so that
+back-substitution multiplies by the stored reciprocal instead of dividing.
+
+`ldiv!(Dfac, rhs)` then performs generated forward and backward substitution
+through the `DiffMatrixLU` factorisation object.
 
 The compact path is the one measured as **FDGrids** in the
 [Benchmarks](benchmarks.md) page. It is the recommended path for repeated
@@ -183,10 +180,10 @@ system is well behaved without pivoting. This is the path optimized for
 Use `lu(D)` when you want the pivoted LAPACK reference path or want to compare
 against LAPACK's `gbtrf!`/`gbtrs!` implementation.
 
-Use `banded_lu!` and the generic triangular solvers when you want a transparent
-ordinary-indexing implementation of the Golub--Van Loan banded algorithm. They
-are useful for experiments and validation, not as the preferred production path
-for compact `DiffMatrix` systems.
+Use `lu!(A, p, q)` when you want a transparent ordinary-indexing implementation
+of the Golub--Van Loan banded algorithm. It returns a `BandedMatrixLU`; pass
+that to `ldiv!` to solve. Useful for experiments and validation, not as the
+preferred production path for compact `DiffMatrix` systems.
 
 The [Benchmarks](benchmarks.md) page compares these three paths across grid
 sizes and stencil widths.

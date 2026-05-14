@@ -44,11 +44,12 @@ LinearAlgebra.mul!(::AbstractArray{T, N}, ::AdjointDiffMatrix{TD, WIDTH}, ::Abst
 ## Linear Solves
 
 ```@docs
-LinearAlgebra.lu(::DiffMatrix)
-LinearAlgebra.ldiv!(::FDGrids.DiffMatrixLU{T, WIDTH}, ::AbstractVector{T}) where {T, WIDTH}
+DiffMatrixLU
 LinearAlgebra.lu!(::DiffMatrix)
-LinearAlgebra.ldiv!(::DiffMatrix, ::AbstractVector)
-banded_lu!
-banded_tril_solve!
-banded_triu_solve
+LinearAlgebra.ldiv!(::FDGrids.DiffMatrixLU, ::AbstractVector)
+BandedMatrixLU
+LinearAlgebra.lu!(::AbstractMatrix, ::Int, ::Int)
+LinearAlgebra.ldiv!(::FDGrids.BandedMatrixLU, ::AbstractVector)
+LinearAlgebra.lu(::DiffMatrix)
+LinearAlgebra.ldiv!(::FDGrids.DiffMatrixLULapack{T, WIDTH}, ::AbstractVector{T}) where {T, WIDTH}
 ```
