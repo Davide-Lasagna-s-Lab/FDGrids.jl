@@ -51,6 +51,26 @@ inspection and tests:
 du ≈ full(D) * u
 ```
 
+Broadcasting keeps compact storage for operations that preserve the stencil
+structure, such as combining compatible `DiffMatrix` objects or using
+`Diagonal`/`UniformScaling` operands:
+
+```julia
+L = D .+ 0.1I      # diagonal shift
+M = D .* I         # keep only the diagonal entries
+```
+
+In-place broadcast assignment writes into existing compact storage and is
+efficient for repeated assembly:
+
+```julia
+A = similar(D)
+A .= 2 .* D .- 0.1I
+```
+
+Use `full(D)` first for broadcasts that intentionally produce dense matrices,
+such as `full(D) .+ rand(size(D)...)`.
+
 The same one-dimensional operator can be applied along a chosen array axis:
 
 ```julia

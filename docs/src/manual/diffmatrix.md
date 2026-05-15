@@ -45,6 +45,65 @@ du ≈ full(D) * u
 
 `full(D)` allocates and is not intended for hot loops.
 
+## Compact Broadcasting
+
+Broadcasting with a `DiffMatrix` keeps the result in compact stencil storage
+only when the operation cannot create nonzeros outside the stored bands. The
+supported matrix-shaped operands are:
+
+- another compatible `DiffMatrix` of the same size,
+- a `Diagonal` matrix,
+- a `UniformScaling`, such as `I` or `3I`.
+
+```@example diffmatrix
+D3 = DiffMatrix(g.xs, 3, 1)
+D5 = DiffMatrix(g.xs, 5, 2)
+
+L = D5 .+ 0.1I
+M = D3 .+ D5
+N = D5 .* I
+
+(typeof(L), typeof(M), typeof(N))
+```
+
+`D .+ 3I` adds to the diagonal. `D .* I` is the elementwise product with the
+identity and therefore keeps only the diagonal entries of `D`. Diagonal matrices
+behave similarly:
+
+```@example diffmatrix
+C = Diagonal(range(1.0, 2.0; length=size(D, 1)))
+FDGrids.full(D .+ C) ≈ FDGrids.full(D) + C
+```
+
+Scalar multiplication is also compact:
+
+```@example diffmatrix
+2 .* D isa DiffMatrix
+```
+
+In-place broadcast assignment writes directly into an existing `DiffMatrix`
+destination and is the preferred form in hot loops:
+
+```@example diffmatrix
+A = similar(D)
+A .= D .+ 3I
+
+FDGrids.full(A) ≈ FDGrids.full(D) + 3I
+```
+
+The same path is used for fused expressions such as `A .= 2 .* D .- 0.1I` and
+does not allocate a temporary `DiffMatrix`.
+
+Broadcasts that would create dense structure are deliberately unsupported as
+compact `DiffMatrix` operations. For example, `D .+ 1` or `D .+ rand(size(D)...)`
+would fill structural zeros outside the stencil. Use `full(D)` first when a
+dense result is intended:
+
+```@example diffmatrix
+dense_result = full(D) .+ rand(size(D)...)
+size(dense_result)
+```
+
 ## Wider Stencils and Higher Derivatives
 
 The same nodes can be reused with a different stencil width or derivative
