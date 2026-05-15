@@ -30,27 +30,6 @@ struct DiffMatrixLU{T, WIDTH, OPTIMISE}
     factors :: DiffMatrix{T, WIDTH, OPTIMISE}
 end
 
-"""
-    lu!(A::DiffMatrix) -> DiffMatrixLU
-
-Factor a `DiffMatrix` in place with the no-pivoting banded LU routine and
-return a `DiffMatrixLU` wrapping the factorised compact storage.
-
-The factorisation overwrites the compact coefficients of `A`. If the
-`OPTIMISE` type parameter is true, the diagonal of `U` is inverted during
-factorisation to save divisions during repeated triangular solves.
-
-This is the preferred factorisation path for performance-critical code using
-`DiffMatrix`. It avoids LAPACK workspace conversion and keeps the factors in the
-same compact coefficient storage. Copy the matrix first if the original
-differentiation operator is still needed.
-
-# Examples
-```julia
-Dfac = lu!(copy(D))
-ldiv!(Dfac, rhs)
-```
-"""
 @generated function _banded_lu!(A::DiffMatrix{T, WIDTH, OPTIMISE}) where {T, WIDTH, OPTIMISE}
     WD = WIDTH >> 1
     op = OPTIMISE ? :(inv(A[i, i])) : :(A[i, i])
@@ -109,6 +88,23 @@ ldiv!(Dfac, rhs)
     end
 end
 
+"""
+    lu!(A::DiffMatrix) -> DiffMatrixLU
+
+Factor a `DiffMatrix` in place using a no-pivot banded LU and return a
+`DiffMatrixLU` wrapping the factorised compact storage.
+
+The compact coefficient array of `A` is overwritten with the LU factors.
+When `OPTIMISE=true` (the default), the diagonal entries of `U` are stored
+inverted to replace divisions with multiplications during triangular solves.
+Copy the matrix first if the original differentiation operator is still needed.
+
+# Examples
+```julia
+Dfac = lu!(copy(D))
+ldiv!(Dfac, rhs)
+```
+"""
 LinearAlgebra.lu!(A::DiffMatrix{T, WIDTH, OPTIMISE}) where {T, WIDTH, OPTIMISE} =
     DiffMatrixLU(_banded_lu!(A))
 
@@ -299,10 +295,10 @@ end
 """
     BandedMatrixLU{M<:AbstractMatrix}
 
-Factorisation of a banded matrix produced by [`lu!`](@ref).
+Factorisation of a banded matrix produced by `lu!(A, p, q)`.
 
 Stores the in-place LU factors alongside the sub- and super-diagonal counts
-`p` and `q` so that [`ldiv!`](@ref) does not need them as separate arguments.
+`p` and `q` so that `ldiv!` does not need them as separate arguments.
 
 # Fields
 
@@ -325,8 +321,8 @@ Factorise a banded matrix in place and return a [`BandedMatrixLU`](@ref).
 
 `p` is the number of subdiagonals and `q` is the number of superdiagonals.
 `A` is overwritten with the no-pivot LU factors. The returned `BandedMatrixLU`
-wraps `A` together with `p` and `q` so that [`ldiv!`](@ref) can be called
-without repeating the bandwidth arguments.
+wraps `A` together with `p` and `q` so that `ldiv!` can be called without
+repeating the bandwidth arguments.
 
 If `check=true` (the default), an O(N²) pass verifies that all entries outside
 the declared band are zero. Pass `check=false` when the band structure is
@@ -354,7 +350,7 @@ LinearAlgebra.lu!(A::AbstractMatrix, p::Int, q::Int; optimise::Bool=false, check
 Solve the banded system represented by a `BandedMatrixLU` factorisation in
 place, overwriting `b` with the solution.
 
-The factorisation must have been produced by [`lu!`](@ref) for a compatible
+The factorisation must have been produced by `lu!(A, p, q)` for a compatible
 matrix. Bandwidth parameters are read from `F` directly.
 """
 LinearAlgebra.ldiv!(F::BandedMatrixLU, b::AbstractVector) =
