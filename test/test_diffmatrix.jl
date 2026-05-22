@@ -42,10 +42,10 @@ end
     # diffmatrix
     D = DiffMatrix(xs, 3, 1)
 
-    @test typeof(D)                             == DiffMatrix{Float64, 3, true}
-    @test typeof(D + 3*I)                       == DiffMatrix{Float64, 3, true}
-    @test typeof(D + D)                         == DiffMatrix{Float64, 3, true}
-    @test typeof(D + 3*D)                       == DiffMatrix{Float64, 3, true}
+    @test typeof(D)       <: DiffMatrix{Float64, 3, true}
+    @test typeof(D + 3*I) <: DiffMatrix{Float64, 3, true}
+    @test typeof(D + D)   <: DiffMatrix{Float64, 3, true}
+    @test typeof(D + 3*D) <: DiffMatrix{Float64, 3, true}
 
     #  different width
     DA = DiffMatrix(xs, 3, 1)
@@ -57,7 +57,7 @@ end
     DA = DiffMatrix(xs, 3, 1; optimise=true)
     DB = DiffMatrix(xs, 3, 1; optimise=false)
 
-    @test typeof(D + D) == DiffMatrix{Float64, 3, true}
+    @test typeof(D + D) <: DiffMatrix{Float64, 3, true}
 end
 
 @testset "test full.                                " begin

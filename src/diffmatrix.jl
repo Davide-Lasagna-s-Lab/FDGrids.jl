@@ -22,43 +22,45 @@ du = similar(u)
 mul!(du, D, u)
 ```
 """
-struct DiffMatrix{T, WIDTH, OPTIMISE} <: AbstractMatrix{T}
-    coeffs :: Vector{T}
+struct DiffMatrix{T, WIDTH, OPTIMISE, V<:AbstractVector{T}} <: AbstractMatrix{T}
+    coeffs::V
 
-    """
-        DiffMatrix(xs, width, order; optimise=true, eltype=Float64)
+    # bypas constructor useful for CUDA adaptation (see ext/FDGridsCUDAExt.jl)
+    DiffMatrix{T, WIDTH, OPTIMISE}(coeffs::V) where {T, WIDTH, OPTIMISE, V<:AbstractVector{T}} =
+        new{T, WIDTH, OPTIMISE, V}(coeffs)
+end
 
-    Construct a finite-difference differentiation matrix on `xs` of the given
-    stencil `width` and derivative `order`.
+"""
+    DiffMatrix(xs, width, order, ::Type{T}=Float64; optimise=true)
 
-    The grid points in `xs` may be non-uniform, but they should be distinct and
-    ordered consistently with the arrays to which the operator will be applied.
-    Boundary rows use one-sided stencils of the same width.
+Construct a finite-difference differentiation matrix on `xs` of the given
+stencil `width` and derivative `order`.
 
-    # Keyword Arguments
-    - `optimise::Bool=true`: pre-invert the diagonal of U during LU factorisation.
-    - `eltype::Type=Float64`: element type of the coefficients.
+The grid points in `xs` may be non-uniform, but they should be distinct and
+ordered consistently with the arrays to which the operator will be applied.
+Boundary rows use one-sided stencils of the same width.
 
-    # Examples
-    ```julia
-    xs = grid(32, -1, 1, GaussLobattoGrid()).xs
-    D2 = DiffMatrix(xs, 7, 2; eltype = Float64)
-    ```
-    """
-    function DiffMatrix(xs::AbstractVector, width::Int, order::Int;
-                        optimise::Bool = true,
-                        eltype::Type   = Float64)
-        3 ≤ width          || throw(ArgumentError("width must be ≥ 3"))
-        width % 2 == 1     || throw(ArgumentError("width must be odd"))
-        width ≤ length(xs) || throw(ArgumentError("width must not exceed the number of grid points"))
+# Keyword Arguments
+- `optimise::Bool=true`: pre-invert the diagonal of U during LU factorisation.
 
-        coeffs = eltype.(vec(get_coeffs(xs, width, order)))
+# Examples
+```julia
+xs = grid(32, -1, 1, GaussLobattoGrid()).xs
+D2 = DiffMatrix(xs, 7, 2, Float64)
+```
+"""
+function DiffMatrix(xs::AbstractVector,
+                 width::Int,
+                 order::Int,
+                      ::Type{T}=Float64;
+              optimise::Bool   =true) where {T}
+    3 ≤ width          || throw(ArgumentError("width must be ≥ 3"))
+    width % 2 == 1     || throw(ArgumentError("width must be odd"))
+    width ≤ length(xs) || throw(ArgumentError("width must not exceed the number of grid points"))
 
-        return new{eltype, width, optimise}(coeffs)
-    end
+    coeffs = T.(vec(get_coeffs(xs, width, order)))
 
-    DiffMatrix{T, WIDTH, OPTIMISE}(coeffs::Vector{T}) where {T, WIDTH, OPTIMISE} =
-        new{T, WIDTH, OPTIMISE}(coeffs)
+    return DiffMatrix{T, width, optimise}(coeffs)
 end
 
 

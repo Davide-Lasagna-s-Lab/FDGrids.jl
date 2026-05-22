@@ -1,18 +1,18 @@
 module FDGridsCUDAExt
 
-using CUDA
-using FDGrids
-import LinearAlgebra
-
-using FDGrids: DiffMatrix
+using CUDA,
+      LinearAlgebra
 using CUDA: i32
+
+using FDGrids
+using FDGrids: DiffMatrix
 
 # TODO: test this for both forward and adjoint operation
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Move a DiffMatrix to the GPU.
-CUDA.cu(d::DiffMatrix{T, WIDTH, OPTIMISE, A}) where {T, WIDTH, OPTIMISE, A} =
-    DiffMatrix{T, WIDTH, OPTIMISE, CuMatrix{T}}(CUDA.cu(Array(d.coeffs)))
+CUDA.cu(d::DiffMatrix{T, WIDTH, OPTIMISE}) where {T, WIDTH, OPTIMISE} =
+    DiffMatrix{T, WIDTH, OPTIMISE}(CUDA.cu(Array(d.coeffs)))
 CUDA.cu(d::AdjointDiffMatrix) =
     AdjointDiffMatrix(CUDA.cu(d.parent), CUDA.cu(d.coeffs))
 
@@ -81,7 +81,7 @@ end
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 @generated function LinearAlgebra.mul!(y::AbstractArray{S, N},
-                                       A::DiffMatrix{T, WIDTH, OPTIMISE, <:CuMatrix},
+                                       A::DiffMatrix{T, WIDTH, OPTIMISE, <:CuArray},
                                        x::AbstractArray{S, N},
                                         ::Val{DIM}=Val(1);
                                 nthreads::TH      =nothing) where {T, S, N, WIDTH, OPTIMISE, DIM, TH<:Union{Nothing, Int}}
@@ -114,7 +114,7 @@ end
 
 function optimal_threads(y, A, x, sz, ::Val{DIM}, ::Val{WIDTH}; max_threads=nothing) where {DIM, WIDTH}
     k = @cuda launch=false kernel!(
-        y, A.coeffs, x, sz, Val($DIM), Val($WIDTH)
+        y, A.coeffs, x, sz, Val(DIM), Val(WIDTH)
     )
     config = launch_configuration(k.fun)
     return isnothing(max_threads) ? config.threads : min(config.threads, prod(sz))
