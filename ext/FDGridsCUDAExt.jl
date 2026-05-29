@@ -1,6 +1,7 @@
 module FDGridsCUDAExt
 
 using CUDA,
+      Adapt
       LinearAlgebra
 using CUDA: i32
 
@@ -8,6 +9,20 @@ using FDGrids
 using FDGrids: DiffMatrix
 
 # TODO: test this for both forward and adjoint operation
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Adapt DiffMatrix for kernel functions
+function Adapt.adapt_structure(to, d::DiffMatrix{T, WIDTH, OPTIMISE}) where {T, WIDTH, OPTIMISE}
+    coeffs = Adapt.adapt_structure(to, d.coeffs)
+    return DiffMatrix{T, WIDTH, OPTIMISE}(coeffs)
+end
+
+function Adapt.adapt_structure(to, d::AdjointDiffMatrix)
+    parent = Adapt.adapt_structure(to, d.parent)
+    coeffs = Adapt.adapt_structure(to, d.coeffs)
+    return AdjointDiffMatrix(parent, coeffs)
+end
+
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Move a DiffMatrix to the GPU.
