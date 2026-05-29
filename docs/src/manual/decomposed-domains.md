@@ -17,6 +17,13 @@ mul!(y_local, D, x_local, Val(DIM), global_idx, local_rng)
 This page documents only the indexing contract. Communication and halo exchange
 remain the responsibility of the caller.
 
+As with the full-array call, append `Val(true)` to add into the existing output
+instead of overwriting it:
+
+```julia
+mul!(y_local, D, x_local, Val(DIM), global_idx, local_rng, Val(true))
+```
+
 ## Contract
 
 - `DIM` is the local array dimension corresponding to the global grid of `D`.
@@ -62,6 +69,15 @@ size(y_local)
 
 The call computes the global rows `17:32` using storage whose local index `1`
 corresponds to global row `15`.
+
+If `y_local` already contains another contribution, use accumulation mode:
+
+```@example decomposed
+base = copy(y_local)
+mul!(y_local, D, x_local, Val(1), first(stored), local_owned, Val(true))
+
+y_local[local_owned, :] ≈ 2 .* base[local_owned, :]
+```
 
 ## Decomposed Direction on Another Axis
 

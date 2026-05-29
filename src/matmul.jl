@@ -21,7 +21,7 @@ end
 # ================================================================================
 
 """
-    _make_kernel_fixed(DIM, WIDTH, N, base_expr) -> Expr
+    _make_kernel_fixed(DIM, WIDTH, N, base_expr, ADD) -> Expr
 
 Emit a stencil kernel that reads exactly WIDTH coefficients from
 `A.coeffs[ptr..]` and WIDTH x-values starting at `x[base_expr..]`.
@@ -32,19 +32,22 @@ Covers all forward regions and the adjoint body:
   - forward/adjoint body: base_expr=:(index - HWIDTH)
   - forward tail:  base_expr=:(size(x,DIM) - WIDTH + 1)
 """
-function _make_kernel_fixed(DIM, WIDTH, N, base_expr)
+function _make_kernel_fixed(DIM, WIDTH, N, base_expr, ADD)
     index = Symbol(:i, DIM)
+    yref = _make_ref(:y, index, DIM, N)
+    store = ADD ? :($yref += s) : :($yref = s)
+
     return quote
         s = A.coeffs[ptr] * $(_make_ref(:x, base_expr, DIM, N))
         Base.Cartesian.@nexprs $(WIDTH - 1) p -> begin
             s += A.coeffs[ptr + p] * $(_make_ref(:x, :(($base_expr) + p), DIM, N))
         end
-        $(_make_ref(:y, index, DIM, N)) = s
+        $store
     end
 end
 
 """
-    _make_kernel_variable(DIM, WIDTH, N, nrows_expr, base_expr) -> Expr
+    _make_kernel_variable(DIM, WIDTH, N, nrows_expr, base_expr, ADD) -> Expr
 
 Emit a stencil kernel that reads a variable number of terms from
 `A.coeffs[ptr..]` and `x[base_expr + _k - 1]` for `_k in 1:nrows_j`.
@@ -53,15 +56,18 @@ Used for adjoint boundary outputs whose stencil row-count varies:
   - adjoint head: nrows_expr=:(index + HWIDTH),                   base_expr=1
   - adjoint tail: nrows_expr=:(size(x,DIM) - index + HWIDTH + 1), base_expr=:(index - HWIDTH)
 """
-function _make_kernel_variable(DIM, WIDTH, N, nrows_expr, base_expr)
+function _make_kernel_variable(DIM, WIDTH, N, nrows_expr, base_expr, ADD)
     index = Symbol(:i, DIM)
+    yref = _make_ref(:y, index, DIM, N)
+    store = ADD ? :($yref += s) : :($yref = s)
+
     return quote
         nrows_j = $nrows_expr
         s = zero(eltype(y))
         for _k in 1:nrows_j
             s += A.coeffs[ptr + _k - 1] * $(_make_ref(:x, :(($base_expr) + _k - 1), DIM, N))
         end
-        $(_make_ref(:y, index, DIM, N)) = s
+        $store
     end
 end
 
@@ -71,13 +77,13 @@ end
 # ================================================================================
 
 """
-    _make_loop_expr_forward(DIM, N, WIDTH) -> Expr
+    _make_loop_expr_forward(DIM, N, WIDTH, ADD) -> Expr
 
 Construct the full nested loop for the forward operator along dimension `DIM`.
 Uses a running `ptr` into `A.coeffs` that advances by `WIDTH` per output.
 Each fiber (outer-loop iteration) resets `ptr = ptr_start`.
 """
-function _make_loop_expr_forward(DIM, N, WIDTH)
+function _make_loop_expr_forward(DIM, N, WIDTH, ADD)
     index  = Symbol(:i, DIM)
     HWIDTH = WIDTH >> 1
 
@@ -101,9 +107,9 @@ function _make_loop_expr_forward(DIM, N, WIDTH)
         ptr_start  = (global_idx + _f_local - 2) * $WIDTH + 1
     end
 
-    head_kernel = _make_kernel_fixed(DIM, WIDTH, N, 1)
-    body_kernel = _make_kernel_fixed(DIM, WIDTH, N, :($index - $HWIDTH))
-    tail_kernel = _make_kernel_fixed(DIM, WIDTH, N, :(size(x, $DIM) - $WIDTH + 1))
+    head_kernel = _make_kernel_fixed(DIM, WIDTH, N, 1, ADD)
+    body_kernel = _make_kernel_fixed(DIM, WIDTH, N, :($index - $HWIDTH), ADD)
+    tail_kernel = _make_kernel_fixed(DIM, WIDTH, N, :(size(x, $DIM) - $WIDTH + 1), ADD)
 
     inner_head = head_kernel
     inner_body = body_kernel
@@ -153,13 +159,13 @@ end
 
 
 """
-    _make_loop_expr_adjoint(DIM, N, WIDTH) -> Expr
+    _make_loop_expr_adjoint(DIM, N, WIDTH, ADD) -> Expr
 
 Construct the full nested loop for the adjoint operator along dimension `DIM`.
 Uses a running `ptr` into `A.coeffs`. Boundary regions span `WIDTH` outputs on
 each side. Each fiber resets `ptr = ptr_start` computed via `_ptr_for_j`.
 """
-function _make_loop_expr_adjoint(DIM, N, WIDTH)
+function _make_loop_expr_adjoint(DIM, N, WIDTH, ADD)
     index  = Symbol(:i, DIM)
     HWIDTH = WIDTH >> 1
 
@@ -181,10 +187,10 @@ function _make_loop_expr_adjoint(DIM, N, WIDTH)
         ptr_start  = _ptr_for_j(global_idx + _g_first_local - 1, size(A, 1), Val($WIDTH))
     end
 
-    head_kernel = _make_kernel_variable(DIM, WIDTH, N, :($index + $HWIDTH), 1)
-    body_kernel = _make_kernel_fixed(DIM, WIDTH, N, :($index - $HWIDTH))
+    head_kernel = _make_kernel_variable(DIM, WIDTH, N, :($index + $HWIDTH), 1, ADD)
+    body_kernel = _make_kernel_fixed(DIM, WIDTH, N, :($index - $HWIDTH), ADD)
     tail_kernel = _make_kernel_variable(DIM, WIDTH, N,
-                      :(size(x, $DIM) - $index + $HWIDTH + 1), :($index - $HWIDTH))
+                      :(size(x, $DIM) - $index + $HWIDTH + 1), :($index - $HWIDTH), ADD)
 
     inner_head = head_kernel
     inner_body = body_kernel
@@ -238,10 +244,11 @@ end
 # ================================================================================
 
 """
-    LinearAlgebra.mul!(y, A::DiffMatrix, x, ::Val{DIM}=Val(1)) -> y
+    LinearAlgebra.mul!(y, A::DiffMatrix, x, ::Val{DIM}=Val(1), ::Val{ADD}=Val(false)) -> y
 
 Apply the forward finite-difference operator `A` to `x` along dimension `DIM`,
-writing the result into `y`. Non-distributed entry point.
+writing the result into `y`. Non-distributed entry point. If `ADD` is `true`,
+add the differentiated values to the existing contents of `y`.
 
 For vectors, the default `DIM=1` applies the usual matrix-vector action. For
 higher-dimensional arrays, each one-dimensional fiber along `DIM` is
@@ -266,20 +273,22 @@ mul!(dA, D, A, Val(1))
 function LinearAlgebra.mul!(y::AbstractArray{S, N},
                             A::DiffMatrix{T, WIDTH},
                             x::AbstractArray{S, N},
-                             ::Val{DIM}  = Val(1)) where {T, S, N, WIDTH, DIM}
+                             ::Val{DIM}  = Val(1),
+                             ::Val{ADD}  = Val(false)) where {T, S, N, WIDTH, DIM, ADD}
     size(x, DIM) == size(y, DIM) == size(A, 1) ||
         throw(ArgumentError("inconsistent inputs size"))
-    return LinearAlgebra.mul!(y, A, x, Val(DIM), 1, 1:size(x, DIM))
+    return LinearAlgebra.mul!(y, A, x, Val(DIM), 1, 1:size(x, DIM), Val(ADD))
 end
 
 """
-    LinearAlgebra.mul!(y, A::DiffMatrix, x, ::Val{DIM}, global_idx, local_rng) -> y
+    LinearAlgebra.mul!(y, A::DiffMatrix, x, ::Val{DIM}, global_idx, local_rng, ::Val{ADD}=Val(false)) -> y
 
 Distribution-aware backend for the forward operator. `@generated` for the concrete
-`(T, N, WIDTH, DIM)` combination.
+`(T, N, WIDTH, DIM, ADD)` combination.
 
 - `global_idx`: global row index corresponding to local index `1` of `x`/`y`.
 - `local_rng`: local portion of dimension `DIM` to process.
+- `ADD`: when `true`, add the result into `y` instead of overwriting it.
 
 This method is intended for domain-decomposed callers. Ordinary local arrays
 should use `mul!(y, A, x, Val(DIM))`.
@@ -289,10 +298,12 @@ should use `mul!(y, A, x, Val(DIM))`.
                                        x::AbstractArray{T, N},
                                         ::Val{DIM},
                               global_idx::Int,
-                               local_rng::UnitRange) where {T, TD, N, WIDTH, DIM}
+                               local_rng::UnitRange,
+                                        ::Val{ADD}=Val(false)) where {T, TD, N, WIDTH, DIM, ADD}
     DIM in 1:N || throw(ArgumentError("inconsistent differentiation dimension"))
+    ADD isa Bool || throw(ArgumentError("ADD must be true or false"))
 
-    block = _make_loop_expr_forward(DIM, N, WIDTH)
+    block = _make_loop_expr_forward(DIM, N, WIDTH, ADD)
     Ni    = [Symbol(:N, d) for d in 1:N]
 
     return quote
@@ -319,10 +330,11 @@ end
 # ================================================================================
 
 """
-    LinearAlgebra.mul!(y, A::AdjointDiffMatrix, x, ::Val{DIM}=Val(1)) -> y
+    LinearAlgebra.mul!(y, A::AdjointDiffMatrix, x, ::Val{DIM}=Val(1), ::Val{ADD}=Val(false)) -> y
 
 Apply the transposed finite-difference operator `A = D*` to `x` along dimension
-`DIM`, writing the result into `y`. Non-distributed entry point.
+`DIM`, writing the result into `y`. Non-distributed entry point. If `ADD` is
+`true`, add the differentiated values to the existing contents of `y`.
 
 # Examples
 ```julia
@@ -339,20 +351,22 @@ mul!(y, Dt, cos.(xs))
 function LinearAlgebra.mul!(y::AbstractArray{S, N},
                             A::AdjointDiffMatrix{T, WIDTH},
                             x::AbstractArray{S, N},
-                             ::Val{DIM}  = Val(1)) where {T, S, N, WIDTH, DIM}
+                             ::Val{DIM}  = Val(1),
+                             ::Val{ADD}  = Val(false)) where {T, S, N, WIDTH, DIM, ADD}
     size(x, DIM) == size(y, DIM) == size(A, 1) ||
         throw(ArgumentError("inconsistent inputs size"))
-    return LinearAlgebra.mul!(y, A, x, Val(DIM), 1, 1:size(x, DIM))
+    return LinearAlgebra.mul!(y, A, x, Val(DIM), 1, 1:size(x, DIM), Val(ADD))
 end
 
 """
-    LinearAlgebra.mul!(y, A::AdjointDiffMatrix, x, ::Val{DIM}, global_idx, local_rng) -> y
+    LinearAlgebra.mul!(y, A::AdjointDiffMatrix, x, ::Val{DIM}, global_idx, local_rng, ::Val{ADD}=Val(false)) -> y
 
 Distribution-aware backend for the adjoint operator. `@generated` for the concrete
-`(T, N, WIDTH, DIM)` combination.
+`(T, N, WIDTH, DIM, ADD)` combination.
 
 - `global_idx`: global row index corresponding to local index `1` of `x`/`y`.
 - `local_rng`: local portion of dimension `DIM` to process.
+- `ADD`: when `true`, add the result into `y` instead of overwriting it.
 
 This method is intended for distributed or slab-local application of an adjoint
 operator. Ordinary local arrays should use `mul!(y, A, x, Val(DIM))`.
@@ -362,10 +376,12 @@ operator. Ordinary local arrays should use `mul!(y, A, x, Val(DIM))`.
                                        x::AbstractArray{T, N},
                                         ::Val{DIM},
                               global_idx::Int,
-                               local_rng::UnitRange) where {T, TD, N, WIDTH, DIM}
+                               local_rng::UnitRange,
+                                        ::Val{ADD}=Val(false)) where {T, TD, N, WIDTH, DIM, ADD}
     DIM in 1:N || throw(ArgumentError("inconsistent differentiation dimension"))
+    ADD isa Bool || throw(ArgumentError("ADD must be true or false"))
 
-    block = _make_loop_expr_adjoint(DIM, N, WIDTH)
+    block = _make_loop_expr_adjoint(DIM, N, WIDTH, ADD)
     Ni    = [Symbol(:N, d) for d in 1:N]
 
     return quote

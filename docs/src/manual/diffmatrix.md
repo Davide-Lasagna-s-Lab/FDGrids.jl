@@ -152,6 +152,21 @@ size(ux3)
 
 The differentiated dimension must have length `size(D, 1)`.
 
+## Accumulating Into an Existing Output
+
+By default, `mul!` overwrites `y`. Pass `Val(true)` as the final argument to add
+the differentiated values into the current contents of `y`:
+
+```@example diffmatrix
+uy = fill(1.0, size(u2))
+mul!(uy, Dx, u2, Val(1), Val(true))
+
+uy ≈ ones(size(u2)) .+ ux
+```
+
+This is useful when assembling sums of finite-difference terms, such as a
+Laplacian made from second derivatives along several array dimensions.
+
 ## Mutating Entries
 
 `DiffMatrix` has a fixed compact band layout. Assignments inside the stored

@@ -11,6 +11,40 @@
     end
 end
 
+@testset "mul! accumulation mode                    " begin
+    xs = gridpoints(12, -1, 1)
+    D = DiffMatrix(xs, 5, 1)
+    Dt = adjoint(D)
+
+    u = rand(12, 3)
+
+    for A in (D, Dt)
+        reference = similar(u)
+        mul!(reference, A, u, Val(1))
+
+        base = rand(12, 3)
+        out = copy(base)
+        mul!(out, A, u, Val(1), Val(true))
+        @test out ≈ base .+ reference
+
+        out = copy(base)
+        mul!(out, A, u, Val(1), 1, 1:size(u, 1), Val(true))
+        @test out ≈ base .+ reference
+
+        out = copy(base)
+        expected = copy(base)
+        local_rng = 3:10
+        expected[local_rng, :] .+= reference[local_rng, :]
+        mul!(out, A, u, Val(1), 1, local_rng, Val(true))
+        @test out ≈ expected
+
+        # The default remains overwrite semantics.
+        out = copy(base)
+        mul!(out, A, u, Val(1))
+        @test out ≈ reference
+    end
+end
+
 @testset "test diffmatrix at point                  " begin
     # number of points
     for M in (10, 20, 30)
