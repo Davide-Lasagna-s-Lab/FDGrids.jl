@@ -375,6 +375,92 @@ interchanges and potentially different fill patterns, which do not fit the
 fixed row layout. The pivoted reference path therefore converts to LAPACK's
 banded workspace and stores a pivot vector separately.
 
+## GPU Kernels
+
+The CUDA extension reuses the host coefficient layouts verbatim. The
+`DiffMatrix` and `AdjointDiffMatrix` types are parametric over their backing
+vector type, so the only thing that changes on the GPU is that
+`coeffs::CuArray` instead of `coeffs::Vector`. The forward and adjoint kernels
+operate on those same row-major and output-major layouts described above.
+
+### Parallel decomposition
+
+Both GPU kernels use a one-thread-per-output design. Each thread receives a
+flat 0-based index `idx`, decomposes it into 1-based cartesian coordinates
+`i_1, …, i_N` using the array shape, and applies the stencil by varying the
+coordinate along `DIM`. The decomposition expression is identical to a
+column-major linearisation, so consecutive threads walk the first dimension
+first.
+
+All index arithmetic uses `Int32`, matching the native register width on
+NVIDIA hardware. The total element count per launch is therefore capped at
+`2^31`, which is comfortably above any practical single-GPU array size.
+
+### Forward kernel
+
+The forward GPU kernel is the GPU analogue of the host body kernel: for
+output `i` along `DIM`, it loads `WIDTH` coefficients from
+`A.coeffs[(i-1)WIDTH + 1 .. i WIDTH]` and `WIDTH` input values starting at a
+boundary-aware base index, then writes the unrolled dot product to `y`. The
+dot product is fully unrolled at generation time because `WIDTH` is a type
+parameter.
+
+Boundary handling is the same three-region split as the host kernel:
+
+  - **head** `i ≤ HWIDTH`           → `base = 1`,
+  - **body** `HWIDTH < i ≤ M-HWIDTH` → `base = i - HWIDTH`,
+  - **tail** `i > M - HWIDTH`        → `base = M - WIDTH + 1`.
+
+Warp divergence is confined to threads in the boundary slabs along `DIM`,
+which is at most `2 HWIDTH ≤ WIDTH` threads per fiber.
+
+### Adjoint kernel
+
+The adjoint GPU kernel mirrors the host adjoint logic. The body region is
+fully unrolled like the forward kernel, because every body output has exactly
+`WIDTH` contributing forward rows and starts at `start = j - HWIDTH`. The
+head and tail regions use small runtime loops bounded by `WIDTH + HWIDTH`
+because their row lengths grow and shrink with `j`.
+
+Pointer formulas are reused unchanged. For output `j` along `DIM`, the
+kernel computes:
+
+```math
+\mathrm{ptr}(j) =
+\begin{cases}
+1 + \mathrm{HWIDTH}(j-1) + (j-1)j/2,
+& j \le \mathrm{WIDTH},\\
+(j-1)\mathrm{WIDTH} + 1,
+& \mathrm{WIDTH} < j \le M-\mathrm{WIDTH},\\
+(M-\mathrm{WIDTH})\mathrm{WIDTH} + 1
++ (\mathrm{WIDTH}+\mathrm{HWIDTH}+1)(j_t-1)
+- (j_t-1)j_t/2,
+& j > M-\mathrm{WIDTH},
+\end{cases}
+```
+
+with `j_t = j - (M - WIDTH)`. These match the host-side closed forms
+inside `_ptr_for_j`.
+
+Because weights are baked into `A.coeffs` at construction time, weighted and
+unweighted adjoints dispatch to the exact same kernel; the kernel never sees
+the weight vector.
+
+### Launch and adaption
+
+The host-side `mul!` methods are responsible for validation, picking a launch
+configuration with `launch_configuration`, and invoking the kernel through
+`@cuda`. The `@cuda` macro automatically adapts each closure argument: a
+`DiffMatrix{T, WIDTH, OPTIMISE, CuArray}` becomes
+`DiffMatrix{T, WIDTH, OPTIMISE, CuDeviceArray}` so the kernel reads
+device-side pointers. The `Adapt.adapt_structure` methods in the extension
+make this work without changing any of the host code paths.
+
+The same `Adapt.adapt(CuArray, _)` machinery is what users invoke to perform
+host-to-device transfers in their own code. The extension's `cu` overloads
+are a thin wrapper that goes through `CUDA.cu` to obtain a Float32 storage,
+preserving the convention of `cu` on plain arrays.
+
 ## Source-Code Guide
 
 The implementation is split by responsibility:
@@ -385,6 +471,7 @@ The implementation is split by responsibility:
 - `src/matmul.jl`: generated kernels for forward and adjoint application.
 - `src/linalg.jl`: reference banded routines and compact `DiffMatrix` solves.
 - `src/grids.jl`: grid constructors and quadrature weights.
+- `ext/FDGridsCUDAExt.jl`: GPU kernels and the `Adapt` / `cu` machinery.
 
 When extending the package, keep these invariants in mind:
 
@@ -394,3 +481,6 @@ When extending the package, keep these invariants in mind:
 4. `global_idx` always refers to local index `1` in decomposed-domain kernels.
 5. `full(A)` and scalar indexing should agree with `mul!` semantics, including
    weighted adjoints.
+6. Adding device backends should preserve the row-major (forward) and
+   output-major variable-length (adjoint) coefficient layouts so the kernels
+   can stay shared with the existing implementations.
