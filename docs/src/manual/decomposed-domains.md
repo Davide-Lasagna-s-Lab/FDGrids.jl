@@ -35,7 +35,7 @@ mul!(y_local, D, x_local, Val(DIM), global_idx, local_rng, Val(true))
 Only entries selected by `local_rng` are meaningful outputs. Other entries of
 `y_local` are left to the caller's storage convention.
 
-## Slab with Halo Points
+## Dense Slab with Halo Points
 
 Suppose the global differentiated direction has length `64`, the stencil width
 is `5`, and a rank owns global rows `17:32`. A centered width-5 stencil needs
@@ -78,6 +78,30 @@ mul!(y_local, D, x_local, Val(1), first(stored), local_owned, Val(true))
 
 y_local[local_owned, :] ≈ 2 .* base[local_owned, :]
 ```
+
+## Halo-Aware Arrays
+
+Some array types keep their ordinary axes for owned rows and expose ghost cells
+through scalar indices outside those axes. `HaloArrays.jl` is one example. For
+the same owned rows `17:32`, the relationship is:
+
+```text
+logical local index:  -1  0 | 1 ... 16 | 17  18
+global row:           15 16 |17 ... 32 | 33  34
+                            owned rows
+```
+
+Once the ghost cells have been populated, evaluate all owned rows with:
+
+```julia
+nlocal = length(owned)
+mul!(y_local, D, x_local, Val(1), first(owned), 1:nlocal)
+```
+
+Here `global_idx = first(owned)` because logical local index `1` is the first
+owned row. The stencil may still read indices such as `0` or `nlocal + 1`
+through the array's halo-aware scalar indexing. `FDGrids.jl` does not populate
+those ghost cells or depend on a particular halo-array package.
 
 ## Decomposed Direction on Another Axis
 

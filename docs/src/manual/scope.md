@@ -12,7 +12,8 @@ reused efficiently across vectors and array fibers.
 - Ordinary and weighted adjoints without forming dense matrices.
 - Grid constructors with quadrature weights that match the node distribution.
 - Compact no-pivot banded LU for repeated solves.
-- Slab-local multiplication when an external code manages halo values.
+- Slab-local multiplication with dense or halo-aware arrays when an external
+  code manages halo values.
 
 This makes the package a good fit for stability calculations, collocation or
 finite-difference boundary value problems, and time-stepping codes that already

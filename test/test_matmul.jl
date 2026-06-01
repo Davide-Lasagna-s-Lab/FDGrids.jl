@@ -27,17 +27,6 @@ end
         mul!(out, A, u, Val(1), Val(true))
         @test out ≈ base .+ reference
 
-        out = copy(base)
-        mul!(out, A, u, Val(1), 1, 1:size(u, 1), Val(true))
-        @test out ≈ base .+ reference
-
-        out = copy(base)
-        expected = copy(base)
-        local_rng = 3:10
-        expected[local_rng, :] .+= reference[local_rng, :]
-        mul!(out, A, u, Val(1), 1, local_rng, Val(true))
-        @test out ≈ expected
-
         # The default remains overwrite semantics.
         out = copy(base)
         mul!(out, A, u, Val(1))

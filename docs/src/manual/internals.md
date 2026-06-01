@@ -257,6 +257,20 @@ The coefficient pointer for the first computed local row is therefore:
 This is why local arrays with halo points should pass `global_idx` for local
 index `1`, not for `first(local_rng)`.
 
+Boundary regions are classified in global rows and then translated back to
+local indices. This matters for a middle slab: its first stored or owned row is
+not a physical boundary merely because it is local index `1`.
+
+Two storage conventions satisfy the contract:
+
+- A dense local buffer can include ghost rows in its ordinary axes and use a
+  shifted `local_rng` for the owned rows.
+- A halo-aware array can keep its ordinary axes for owned rows and provide
+  scalar indices outside those axes, such as `0` and `n + 1`, for ghost cells.
+
+In both cases, callers must populate the required ghost values before applying
+the operator.
+
 ## Adjoint Operator Layout
 
 The transpose of a banded matrix cannot use the same simple row-major

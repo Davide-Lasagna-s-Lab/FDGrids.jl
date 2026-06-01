@@ -21,8 +21,9 @@ where a fixed one-dimensional derivative operator is applied many times.
 - Ordinary and quadrature-weighted adjoints.
 - Grid constructors with matching quadrature weights.
 - Compact banded LU factorisation and triangular solves.
-- Lower-level hooks for slab-local or decomposed-domain storage, including
-  in-place accumulation into an existing output array.
+- Lower-level hooks for slab-local or decomposed-domain storage with explicit
+  or halo-aware ghost-cell indexing, including in-place accumulation into an
+  existing output array.
 
 ## Installation
 
