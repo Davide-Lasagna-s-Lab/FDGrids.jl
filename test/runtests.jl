@@ -4,6 +4,7 @@ using Test
 
 include("test_utils.jl")
 include("test_diffmatrix.jl")
+include("test_symmetry.jl")
 include("test_adjoint.jl")
 include("test_linalg.jl")
 include("test_matmul.jl")

@@ -41,41 +41,65 @@ result is intended.
 """
 struct DiffMatrix{T, WIDTH, OPTIMISE} <: AbstractMatrix{T}
     coeffs :: Vector{T}
+    # `(left, right)` boundary symmetry; see `src/symmetry.jl`. This is a runtime
+    # field (not a type parameter) and the main switch: a `NoSymmetry()` side
+    # leaves its coefficients unchanged, while `Even(c)`/`Odd(c)` rewrites that
+    # side's boundary rows mirrored about the centre `c`. Interior rows are never
+    # changed.
+    symmetry :: Tuple{Symmetry, Symmetry}
 
     """
-        DiffMatrix(xs, width, order; optimise=true, eltype=Float64)
+        DiffMatrix(xs, width, order; optimise=true, eltype=Float64,
+                   symmetry=NO_SYMMETRY)
 
     Construct a finite-difference differentiation matrix on `xs` of the given
     stencil `width` and derivative `order`.
 
     The grid points in `xs` may be non-uniform, but they should be distinct and
     ordered consistently with the arrays to which the operator will be applied.
-    Boundary rows use one-sided stencils of the same width.
+    By default the boundary rows use one-sided stencils of the same width; the
+    `symmetry` keyword can replace those rows with mirror stencils.
 
     # Keyword Arguments
     - `optimise::Bool=true`: pre-invert the diagonal of U during LU factorisation.
     - `eltype::Type=Float64`: element type of the coefficients.
+    - `symmetry=NO_SYMMETRY`: `(left, right)` boundary symmetry, each a `Symmetry`
+      object. A `NoSymmetry()` side keeps its one-sided boundary rows unchanged;
+      `Even(c)`/`Odd(c)` rewrites that side's boundary rows with a stencil
+      mirrored about the centre `c`. The centre is a `Real` or `nothing` (the
+      default boundary node: `xs[1]` on the left, `xs[end]` on the right), and for
+      an active side it must lie at or beyond the boundary node (`c ≤ xs[1]` on
+      the left, `c ≥ xs[end]` on the right). Interior rows are never affected.
+      This is a lightweight mirror stencil, not a full boundary-condition system
+      and not pipe-specific regularity.
 
     # Examples
     ```julia
     xs = grid(32, -1, 1, GaussLobattoGrid()).xs
     D2 = DiffMatrix(xs, 7, 2; eltype = Float64)
+    Ds = DiffMatrix(xs, 5, 1; symmetry = (Even(-1), NoSymmetry()))
     ```
     """
     function DiffMatrix(xs::AbstractVector, width::Int, order::Int;
                         optimise::Bool = true,
-                        eltype::Type   = Float64)
+                        eltype::Type   = Float64,
+                        symmetry       = NO_SYMMETRY)
         3 ≤ width          || throw(ArgumentError("width must be ≥ 3"))
         width % 2 == 1     || throw(ArgumentError("width must be odd"))
         width ≤ length(xs) || throw(ArgumentError("width must not exceed the number of grid points"))
 
-        coeffs = eltype.(vec(get_coeffs(xs, width, order)))
+        symmetry = validate_symmetry(symmetry)
 
-        return new{eltype, width, optimise}(coeffs)
+        raw = get_coeffs(xs, width, order)
+        apply_symmetry_stencil!(raw, xs, width, order, symmetry)
+        coeffs = eltype.(vec(raw))
+
+        return new{eltype, width, optimise}(coeffs, symmetry)
     end
 
-    DiffMatrix{T, WIDTH, OPTIMISE}(coeffs::Vector{T}) where {T, WIDTH, OPTIMISE} =
-        new{T, WIDTH, OPTIMISE}(coeffs)
+    DiffMatrix{T, WIDTH, OPTIMISE}(coeffs::Vector{T},
+                                   symmetry::Tuple{Symmetry, Symmetry} = NO_SYMMETRY) where {T, WIDTH, OPTIMISE} =
+        new{T, WIDTH, OPTIMISE}(coeffs, symmetry)
 end
 
 
@@ -166,7 +190,7 @@ Return a deep copy of the compact coefficient storage while preserving the
 type parameters of `d`.
 """
 Base.copy(d::DiffMatrix{T, WIDTH, OPTIMISE}) where {T, WIDTH, OPTIMISE} =
-    DiffMatrix{T, WIDTH, OPTIMISE}(copy(d.coeffs))
+    DiffMatrix{T, WIDTH, OPTIMISE}(copy(d.coeffs), d.symmetry)
 
 """
     full(A::DiffMatrix) -> Matrix{T}

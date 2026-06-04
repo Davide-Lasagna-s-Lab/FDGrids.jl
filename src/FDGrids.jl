@@ -3,6 +3,7 @@ module FDGrids
 import LinearAlgebra
 
 include("utils.jl")
+include("symmetry.jl")
 include("diffmatrix.jl")
 include("adjoint.jl")
 include("linalg.jl")
@@ -23,6 +24,17 @@ export DiffMatrix,
        quadweights,
        _quadweights,
        BandedMatrixLU,
-       basis_vector
+       basis_vector,
+       symmetry,
+       symmetry_left,
+       symmetry_right,
+       symmetry_centre,
+       symmetry_centre_left,
+       symmetry_centre_right,
+       Symmetry,
+       NoSymmetry,
+       Even,
+       Odd,
+       NO_SYMMETRY
 
 end
