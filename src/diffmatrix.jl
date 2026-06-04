@@ -43,9 +43,9 @@ struct DiffMatrix{T, WIDTH, OPTIMISE} <: AbstractMatrix{T}
     coeffs :: Vector{T}
     # `(left, right)` boundary symmetry; see `src/symmetry.jl`. This is a runtime
     # field (not a type parameter) and the main switch: a `NoSymmetry()` side
-    # leaves its coefficients unchanged, while `Even(c)`/`Odd(c)` rewrites that
-    # side's boundary rows mirrored about the centre `c`. Interior rows are never
-    # changed.
+    # leaves its coefficients unchanged, while `EvenSymmetry(c)`/`OddSymmetry(c)`
+    # rewrites that side's boundary rows mirrored about the centre `c`. Interior
+    # rows are never changed.
     symmetry :: Tuple{Symmetry, Symmetry}
 
     """
@@ -65,8 +65,8 @@ struct DiffMatrix{T, WIDTH, OPTIMISE} <: AbstractMatrix{T}
     - `eltype::Type=Float64`: element type of the coefficients.
     - `symmetry=NO_SYMMETRY`: `(left, right)` boundary symmetry, each a `Symmetry`
       object. A `NoSymmetry()` side keeps its one-sided boundary rows unchanged;
-      `Even(c)`/`Odd(c)` rewrites that side's boundary rows with a stencil
-      mirrored about the centre `c`. The centre is a `Real` or `nothing` (the
+      `EvenSymmetry(c)`/`OddSymmetry(c)` rewrites that side's boundary rows with a
+      stencil mirrored about the centre `c`. The centre is a `Real` or `nothing` (the
       default boundary node: `xs[1]` on the left, `xs[end]` on the right), and for
       an active side it must lie at or beyond the boundary node (`c ≤ xs[1]` on
       the left, `c ≥ xs[end]` on the right). Interior rows are never affected.
@@ -77,7 +77,7 @@ struct DiffMatrix{T, WIDTH, OPTIMISE} <: AbstractMatrix{T}
     ```julia
     xs = grid(32, -1, 1, GaussLobattoGrid()).xs
     D2 = DiffMatrix(xs, 7, 2; eltype = Float64)
-    Ds = DiffMatrix(xs, 5, 1; symmetry = (Even(-1), NoSymmetry()))
+    Ds = DiffMatrix(xs, 5, 1; symmetry = (EvenSymmetry(-1), NoSymmetry()))
     ```
     """
     function DiffMatrix(xs::AbstractVector, width::Int, order::Int;

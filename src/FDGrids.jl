@@ -33,8 +33,8 @@ export DiffMatrix,
        symmetry_centre_right,
        Symmetry,
        NoSymmetry,
-       Even,
-       Odd,
+       EvenSymmetry,
+       OddSymmetry,
        NO_SYMMETRY
 
 end

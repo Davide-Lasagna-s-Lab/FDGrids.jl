@@ -1,17 +1,17 @@
 # Boundary symmetry for `DiffMatrix`.
 #
 # A boundary's symmetry is described by a `Symmetry` object: `NoSymmetry()`
-# leaves that side untouched, while `Even(c)`/`Odd(c)` rewrite that side's
-# boundary rows with a centred stencil whose out-of-range nodes are mirrored
-# about the centre `c` (see `apply_symmetry_stencil!`). The `symmetry` field of
-# a `DiffMatrix` holds a `(left, right)` tuple of these objects and is the main
-# switch; interior rows and `NoSymmetry()` sides are left untouched.
+# leaves that side untouched, while `EvenSymmetry(c)`/`OddSymmetry(c)` rewrite
+# that side's boundary rows with a centred stencil whose out-of-range nodes are
+# mirrored about the centre `c` (see `apply_symmetry_stencil!`). The `symmetry`
+# field of a `DiffMatrix` holds a `(left, right)` tuple of these objects and is
+# the main switch; interior rows and `NoSymmetry()` sides are left untouched.
 
 """
     Symmetry
 
 Abstract supertype for boundary symmetries. Concrete types are `NoSymmetry`,
-`Even`, and `Odd`.
+`EvenSymmetry`, and `OddSymmetry`.
 """
 abstract type Symmetry end
 
@@ -23,47 +23,47 @@ No boundary symmetry: the side keeps its one-sided boundary rows unchanged.
 struct NoSymmetry <: Symmetry end
 
 """
-    Even(centre = nothing)
+    EvenSymmetry(centre = nothing)
 
 Even (`u(2c - x) = u(x)`) boundary symmetry about `centre`. `centre` is a `Real`
 or `nothing`, where `nothing` means the default boundary node (`xs[1]` on the
 left, `xs[end]` on the right).
 """
-struct Even{C<:Union{Real, Nothing}} <: Symmetry
+struct EvenSymmetry{C<:Union{Real, Nothing}} <: Symmetry
     centre :: C
 end
-Even() = Even(nothing)
+EvenSymmetry() = EvenSymmetry(nothing)
 
 """
-    Odd(centre = nothing)
+    OddSymmetry(centre = nothing)
 
 Odd (`u(2c - x) = -u(x)`) boundary symmetry about `centre`. `centre` is a `Real`
 or `nothing`, where `nothing` means the default boundary node (`xs[1]` on the
 left, `xs[end]` on the right).
 """
-struct Odd{C<:Union{Real, Nothing}} <: Symmetry
+struct OddSymmetry{C<:Union{Real, Nothing}} <: Symmetry
     centre :: C
 end
-Odd() = Odd(nothing)
+OddSymmetry() = OddSymmetry(nothing)
 
 const NO_SYMMETRY = (NoSymmetry(), NoSymmetry())
 
 # The point a side is mirrored about; `nothing` means "use the default boundary
 # node". `NoSymmetry` carries no centre.
 centre(::NoSymmetry) = nothing
-centre(s::Even) = s.centre
-centre(s::Odd)  = s.centre
+centre(s::EvenSymmetry) = s.centre
+centre(s::OddSymmetry)  = s.centre
 
 # Sign applied to a reflected (ghost) node's finite-difference weight.
-ghost_sign(::Even) = 1.0
-ghost_sign(::Odd)  = -1.0
+ghost_sign(::EvenSymmetry) = 1.0
+ghost_sign(::OddSymmetry)  = -1.0
 
 function validate_symmetry(symmetry)
     symmetry isa Tuple && length(symmetry) == 2 ||
         throw(ArgumentError("symmetry must be a (left, right) tuple"))
 
     all(s -> s isa Symmetry, symmetry) ||
-        throw(ArgumentError("symmetry entries must be NoSymmetry, Even, or Odd"))
+        throw(ArgumentError("symmetry entries must be NoSymmetry, EvenSymmetry, or OddSymmetry"))
 
     return symmetry
 end
@@ -73,7 +73,8 @@ symmetry_left(D)  = D.symmetry[1]
 symmetry_right(D) = D.symmetry[2]
 
 # The resolved (recorded) centre of each side; `nothing` when the side carries
-# no explicit centre (`NoSymmetry`, or `Even()`/`Odd()` left at the default).
+# no explicit centre (`NoSymmetry`, or `EvenSymmetry()`/`OddSymmetry()` left at
+# the default boundary node).
 symmetry_centre(D) = (centre(D.symmetry[1]), centre(D.symmetry[2]))
 symmetry_centre_left(D)  = centre(D.symmetry[1])
 symmetry_centre_right(D) = centre(D.symmetry[2])
@@ -94,8 +95,8 @@ never touched. For an active side, each boundary row `i` (the left rows
 centred stencil `m = i-HWIDTH : i+HWIDTH`. Real indices `1 ≤ m ≤ N` are ordinary
 grid nodes; out-of-range `m` are ghost nodes reflected about the centre `c`:
 
-  - `Even`: `u(2c - x) =  u(x)`
-  - `Odd` : `u(2c - x) = -u(x)`
+  - `EvenSymmetry`: `u(2c - x) =  u(x)`
+  - `OddSymmetry` : `u(2c - x) = -u(x)`
 
 A ghost node maps back to a real column `j` (`xs[j]`), and its finite-difference
 weight is folded onto column `j` with sign `+1` (even) or `-1` (odd). Returns `C`
