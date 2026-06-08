@@ -66,10 +66,11 @@ struct DiffMatrix{T, WIDTH, OPTIMISE} <: AbstractMatrix{T}
     - `symmetry=NO_SYMMETRY`: `(left, right)` boundary symmetry, each a `Symmetry`
       object. A `NoSymmetry()` side keeps its one-sided boundary rows unchanged;
       `EvenSymmetry(c)`/`OddSymmetry(c)` rewrites that side's boundary rows with a
-      stencil mirrored about the centre `c`. The centre is a `Real` or `nothing` (the
-      default boundary node: `xs[1]` on the left, `xs[end]` on the right), and for
-      an active side it must lie at or beyond the boundary node (`c ≤ xs[1]` on
-      the left, `c ≥ xs[end]` on the right). Interior rows are never affected.
+      stencil mirrored about the centre `c`. The centre is required and must be
+      a `Real`; use `xs[1]` on the left or `xs[end]` on the right for boundary-
+      centred symmetry. For an active side it must lie at or beyond the boundary
+      node (`c ≤ xs[1]` on the left, `c ≥ xs[end]` on the right). Interior rows
+      are never affected.
       This is a lightweight mirror stencil, not a full boundary-condition system
       and not pipe-specific regularity.
 

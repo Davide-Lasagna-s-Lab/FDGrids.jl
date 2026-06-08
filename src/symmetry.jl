@@ -23,33 +23,36 @@ No boundary symmetry: the side keeps its one-sided boundary rows unchanged.
 struct NoSymmetry <: Symmetry end
 
 """
-    EvenSymmetry(centre = nothing)
+    EvenSymmetry(centre)
 
-Even (`u(2c - x) = u(x)`) boundary symmetry about `centre`. `centre` is a `Real`
-or `nothing`, where `nothing` means the default boundary node (`xs[1]` on the
-left, `xs[end]` on the right).
+Even (`u(2c - x) = u(x)`) boundary symmetry about `centre`.
+
+`centre` must be supplied explicitly and must be a `Real`. Use `xs[1]` for a
+left boundary-centred symmetry or `xs[end]` for a right boundary-centred
+symmetry.
 """
-struct EvenSymmetry{C<:Union{Real, Nothing}} <: Symmetry
+struct EvenSymmetry{C<:Real} <: Symmetry
     centre :: C
 end
-EvenSymmetry() = EvenSymmetry(nothing)
+EvenSymmetry() = throw(ArgumentError("EvenSymmetry requires an explicit centre"))
 
 """
-    OddSymmetry(centre = nothing)
+    OddSymmetry(centre)
 
-Odd (`u(2c - x) = -u(x)`) boundary symmetry about `centre`. `centre` is a `Real`
-or `nothing`, where `nothing` means the default boundary node (`xs[1]` on the
-left, `xs[end]` on the right).
+Odd (`u(2c - x) = -u(x)`) boundary symmetry about `centre`.
+
+`centre` must be supplied explicitly and must be a `Real`. Use `xs[1]` for a
+left boundary-centred symmetry or `xs[end]` for a right boundary-centred
+symmetry.
 """
-struct OddSymmetry{C<:Union{Real, Nothing}} <: Symmetry
+struct OddSymmetry{C<:Real} <: Symmetry
     centre :: C
 end
-OddSymmetry() = OddSymmetry(nothing)
+OddSymmetry() = throw(ArgumentError("OddSymmetry requires an explicit centre"))
 
 const NO_SYMMETRY = (NoSymmetry(), NoSymmetry())
 
-# The point a side is mirrored about; `nothing` means "use the default boundary
-# node". `NoSymmetry` carries no centre.
+# The point a side is mirrored about. `NoSymmetry` carries no centre.
 centre(::NoSymmetry) = nothing
 centre(s::EvenSymmetry) = s.centre
 centre(s::OddSymmetry)  = s.centre
@@ -72,15 +75,10 @@ symmetry(D) = D.symmetry
 symmetry_left(D)  = D.symmetry[1]
 symmetry_right(D) = D.symmetry[2]
 
-# The resolved (recorded) centre of each side; `nothing` when the side carries
-# no explicit centre (`NoSymmetry`, or `EvenSymmetry()`/`OddSymmetry()` left at
-# the default boundary node).
+# The recorded centre of each side; `nothing` when the side is `NoSymmetry`.
 symmetry_centre(D) = (centre(D.symmetry[1]), centre(D.symmetry[2]))
 symmetry_centre_left(D)  = centre(D.symmetry[1])
 symmetry_centre_right(D) = centre(D.symmetry[2])
-
-# Resolve the centre for one side: `nothing` means the default boundary node.
-_resolve_centre(c, default) = c === nothing ? float(default) : float(c)
 
 """
     apply_symmetry_stencil!(C, xs, width, order, symmetry) -> C
@@ -116,7 +114,7 @@ function apply_symmetry_stencil!(C, xs, width::Int, order::Int, symmetry)
     # Guard against a centre placed inside the grid, which would make the mirror
     # stencil ambiguous. Only checked for active sides.
     if !(symL isa NoSymmetry)
-        cL = _resolve_centre(centre(symL), first(xs))
+        cL = float(centre(symL))
         cL ≤ first(xs) ||
             throw(ArgumentError("left symmetry centre must satisfy c ≤ first(xs)"))
         for i in 1:HWIDTH
@@ -124,7 +122,7 @@ function apply_symmetry_stencil!(C, xs, width::Int, order::Int, symmetry)
         end
     end
     if !(symR isa NoSymmetry)
-        cR = _resolve_centre(centre(symR), last(xs))
+        cR = float(centre(symR))
         cR ≥ last(xs) ||
             throw(ArgumentError("right symmetry centre must satisfy c ≥ last(xs)"))
         for i in (N - HWIDTH + 1):N
