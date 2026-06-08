@@ -17,6 +17,7 @@ where a fixed one-dimensional derivative operator is applied many times.
 
 - Finite-difference operators on arbitrary one-dimensional nodes.
 - User-selected odd stencil widths and derivative orders.
+- Optional even/odd boundary symmetry using mirror stencils.
 - Fast `mul!` application along any array dimension.
 - Ordinary and quadrature-weighted adjoints.
 - Grid constructors with matching quadrature weights.
@@ -51,6 +52,26 @@ inspection and tests:
 ```julia
 du ≈ full(D) * u
 ```
+
+Boundary rows normally use one-sided stencils. If a solution has known parity
+at a boundary, pass a `(left, right)` symmetry tuple to replace those rows with
+mirror stencils:
+
+```julia
+Dsym = DiffMatrix(g.xs, 5, 1;
+    symmetry = (EvenSymmetry(first(g.xs)), OddSymmetry(last(g.xs))))
+```
+
+Use `NoSymmetry()` for a side that should keep its default one-sided stencil:
+
+```julia
+Dleft = DiffMatrix(g.xs, 5, 2;
+    symmetry = (EvenSymmetry(first(g.xs)), NoSymmetry()))
+```
+
+The symmetry centre is explicit. For active sides it must lie at or beyond the
+corresponding boundary (`c ≤ first(xs)` on the left, `c ≥ last(xs)` on the
+right); missing or invalid centres are reported with the affected side.
 
 Broadcasting keeps compact storage for operations that preserve the stencil
 structure, such as combining compatible `DiffMatrix` objects or using

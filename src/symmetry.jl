@@ -34,7 +34,8 @@ symmetry.
 struct EvenSymmetry{C<:Real} <: Symmetry
     centre :: C
 end
-EvenSymmetry() = throw(ArgumentError("EvenSymmetry requires an explicit centre"))
+struct MissingEvenSymmetry <: Symmetry end
+EvenSymmetry() = MissingEvenSymmetry()
 
 """
     OddSymmetry(centre)
@@ -48,7 +49,8 @@ symmetry.
 struct OddSymmetry{C<:Real} <: Symmetry
     centre :: C
 end
-OddSymmetry() = throw(ArgumentError("OddSymmetry requires an explicit centre"))
+struct MissingOddSymmetry <: Symmetry end
+OddSymmetry() = MissingOddSymmetry()
 
 const NO_SYMMETRY = (NoSymmetry(), NoSymmetry())
 
@@ -56,10 +58,24 @@ const NO_SYMMETRY = (NoSymmetry(), NoSymmetry())
 centre(::NoSymmetry) = nothing
 centre(s::EvenSymmetry) = s.centre
 centre(s::OddSymmetry)  = s.centre
+centre(::MissingEvenSymmetry) = nothing
+centre(::MissingOddSymmetry)  = nothing
 
 # Sign applied to a reflected (ghost) node's finite-difference weight.
 ghost_sign(::EvenSymmetry) = 1.0
 ghost_sign(::OddSymmetry)  = -1.0
+
+symmetry_name(::EvenSymmetry) = "EvenSymmetry"
+symmetry_name(::OddSymmetry) = "OddSymmetry"
+symmetry_name(::MissingEvenSymmetry) = "EvenSymmetry"
+symmetry_name(::MissingOddSymmetry) = "OddSymmetry"
+
+function checked_symmetry_centre(sym::Symmetry, side::Symbol)
+    if sym isa MissingEvenSymmetry || sym isa MissingOddSymmetry
+        throw(ArgumentError("$(side) $(symmetry_name(sym)) requires an explicit centre"))
+    end
+    return float(centre(sym))
+end
 
 function validate_symmetry(symmetry)
     symmetry isa Tuple && length(symmetry) == 2 ||
@@ -114,7 +130,7 @@ function apply_symmetry_stencil!(C, xs, width::Int, order::Int, symmetry)
     # Guard against a centre placed inside the grid, which would make the mirror
     # stencil ambiguous. Only checked for active sides.
     if !(symL isa NoSymmetry)
-        cL = float(centre(symL))
+        cL = checked_symmetry_centre(symL, :left)
         cL ≤ first(xs) ||
             throw(ArgumentError("left symmetry centre must satisfy c ≤ first(xs)"))
         for i in 1:HWIDTH
@@ -122,7 +138,7 @@ function apply_symmetry_stencil!(C, xs, width::Int, order::Int, symmetry)
         end
     end
     if !(symR isa NoSymmetry)
-        cR = float(centre(symR))
+        cR = checked_symmetry_centre(symR, :right)
         cR ≥ last(xs) ||
             throw(ArgumentError("right symmetry centre must satisfy c ≥ last(xs)"))
         for i in (N - HWIDTH + 1):N

@@ -41,8 +41,10 @@ end
     @test symmetry_centre(Ds) == (first(xs), last(xs))
     @test symmetry(copy(Ds)) == sym
 
-    @test_throws ArgumentError EvenSymmetry()
-    @test_throws ArgumentError OddSymmetry()
+    @test_throws ArgumentError DiffMatrix(xs, 5, 1; symmetry = (EvenSymmetry(), NoSymmetry()))
+    @test_throws ArgumentError DiffMatrix(xs, 5, 1; symmetry = (NoSymmetry(), EvenSymmetry()))
+    @test_throws ArgumentError DiffMatrix(xs, 5, 1; symmetry = (OddSymmetry(), NoSymmetry()))
+    @test_throws ArgumentError DiffMatrix(xs, 5, 1; symmetry = (NoSymmetry(), OddSymmetry()))
     @test_throws MethodError EvenSymmetry("0")
 
     for bad in ((:bad, NoSymmetry()),
