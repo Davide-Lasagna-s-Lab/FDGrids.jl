@@ -87,3 +87,37 @@
     @test_throws ArgumentError MappedGrid(1.5)                     # α > 1
     @test_throws ArgumentError MappedGrid(0.5, 0)                  # order < 1
 end
+
+
+@testset "test half-Chebyshev pipe grid             " begin
+    M = 64
+    R = 2.0
+    g = grid(M, 0.0, R, HalfChebyshevGrid())
+
+    @test g isa NamedTuple
+    @test haskey(g, :xs)
+    @test haskey(g, :ws)
+    @test length(g.xs) == M
+    @test length(g.ws) == M
+
+    @test issorted(g.xs)
+    @test 0.0 < first(g.xs)
+    @test last(g.xs) ≈ R
+
+    # The half-Chebyshev pipe weights are for the radial measure r dr.
+    @test sum(g.ws) ≈ R^2 / 2 atol=1e-4
+    @test sum(g.xs .^ 2 .* g.ws) ≈ R^4 / 4 atol=1e-3
+    @test all(g.ws .> 0)
+
+    # The centreline is handled with the existing mirror-symmetry stencils.
+    r = grid(48, 0.0, 1.0, HalfChebyshevGrid()).xs
+    D_even = DiffMatrix(r, 9, 1; symmetry = (EvenSymmetry(0.0), NoSymmetry()))
+    D_odd  = DiffMatrix(r, 9, 1; symmetry = (OddSymmetry(0.0),  NoSymmetry()))
+
+    @test D_even * (r .^ 2) ≈ 2 .* r atol=1e-11
+    @test D_odd  * r       ≈ ones(length(r)) atol=1e-11
+
+    @test_throws ArgumentError HalfChebyshevGrid(1)
+    @test_throws ArgumentError grid(M, 1.0, R, HalfChebyshevGrid())
+    @test_throws ArgumentError grid(4, 0.0, 1.0, HalfChebyshevGrid(4))
+end
