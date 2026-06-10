@@ -38,7 +38,6 @@ end
 # ================================================================================
 # Adapt and cu type tests
 # ================================================================================
-
 @testset "FDGridsCUDAExt: adaptation                 " begin
     M = 64
     @testset "DiffMatrix width=$width" for width in (3, 5, 7)
@@ -97,9 +96,8 @@ end
 
 
 # ================================================================================
-# Forward mul! — 1D
+# Forward mul!
 # ================================================================================
-
 @testset "FDGridsCUDAExt: forward 1D                 " begin
     M = 128
 
@@ -110,7 +108,7 @@ end
         D  = DiffMatrix(xs, width, 1)
         Dg = _gpu_op(D, T)
 
-        u  = exp.(0.7 .* xs)              # smooth field
+        u  = exp.(0.7 .* xs) # smooth field
         y_cpu = similar(u)
         mul!(y_cpu, D, u)
 
@@ -121,11 +119,6 @@ end
         @test Array(yg) ≈ T.(y_cpu) rtol = rtol
     end
 end
-
-
-# ================================================================================
-# Forward mul! — N-D over all DIM choices
-# ================================================================================
 
 @testset "FDGridsCUDAExt: forward N-D                " begin
     M     = 32
@@ -157,9 +150,8 @@ end
 
 
 # ================================================================================
-# Adjoint mul! — 1D
+# Adjoint mul!
 # ================================================================================
-
 @testset "FDGridsCUDAExt: adjoint 1D                 " begin
     M = 128
 
@@ -182,11 +174,6 @@ end
         @test Array(yg) ≈ T.(y_cpu) rtol = rtol
     end
 end
-
-
-# ================================================================================
-# Adjoint mul! — N-D over all DIM choices
-# ================================================================================
 
 @testset "FDGridsCUDAExt: adjoint N-D                " begin
     M     = 32
@@ -223,7 +210,6 @@ end
 # ================================================================================
 # Weighted adjoint
 # ================================================================================
-#
 # The weights are baked into A.coeffs at construction time, so on the kernel
 # side a weighted adjoint is indistinguishable from an unweighted one. This
 # test exercises the same code path against the heavier CPU reference path
@@ -257,7 +243,6 @@ end
 # ================================================================================
 # Argument validation
 # ================================================================================
-
 @testset "FDGridsCUDAExt: argument validation        " begin
     M  = 32
     xs = collect(range(-1.0, 1.0; length = M))
@@ -293,7 +278,6 @@ end
 # ================================================================================
 # nthreads override is honoured
 # ================================================================================
-
 @testset "FDGridsCUDAExt: nthreads override          " begin
     M  = 256
     xs = collect(range(-1.0, 1.0; length = M))

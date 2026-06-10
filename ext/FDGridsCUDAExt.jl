@@ -201,7 +201,7 @@ indexing expression for the differentiated axis at generation time, so the
 unrolled stencil body indexes the array with concrete index expressions
 instead of constructing CartesianIndex objects on the device.
 """
-_x_idx(DIM::Int, N::Int, kexpr) =
+_x_idx(DIM::Integer, N::Integer, kexpr) =
     Expr(:tuple, ntuple(d -> d == DIM ? kexpr : Symbol(:i_, d), N)...)
 
 
@@ -500,8 +500,8 @@ mul!(du, Dg, u)
 function LinearAlgebra.mul!(y::AbstractArray{S, N},
                             A::DiffMatrix{T, WIDTH, OPTIMISE, <:CuArray},
                             x::AbstractArray{S, N},
-                             ::Val{DIM}                    = Val(1);
-                            nthreads::Union{Nothing, Int} = nothing
+                             ::Val{DIM}                  =Val(1);
+                            nthreads::Union{Nothing, Int}=nothing
                             ) where {T, S, N, WIDTH, OPTIMISE, DIM}
     # Rank cap of 4 reflects the rank cap of the CPU code path and keeps the
     # generated kernel compilation footprint bounded. Most callers use N ≤ 3.
@@ -563,8 +563,8 @@ mul!(y, Ag, v)
 function LinearAlgebra.mul!(y::AbstractArray{S, N},
                             A::AdjointDiffMatrix{T, WIDTH, P, <:CuArray},
                             x::AbstractArray{S, N},
-                             ::Val{DIM}                    = Val(1);
-                            nthreads::Union{Nothing, Int} = nothing
+                             ::Val{DIM}                  =Val(1);
+                            nthreads::Union{Nothing, Int}=nothing
                             ) where {T, S, N, WIDTH, P, DIM}
     N   in 1:4 || throw(ArgumentError("N must be in 1:4"))
     DIM in 1:N || throw(ArgumentError("DIM must be in 1:N"))
@@ -584,5 +584,4 @@ function LinearAlgebra.mul!(y::AbstractArray{S, N},
     return y
 end
 
-
-end # module
+end

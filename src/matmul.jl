@@ -337,9 +337,9 @@ mul!(y, Dt, cos.(xs))
 ```
 """
 function LinearAlgebra.mul!(y::AbstractArray{S, N},
-                            A::AdjointDiffMatrix{T, WIDTH},
+                            A::AdjointDiffMatrix{T, WIDTH, P, <:AbstractArray},
                             x::AbstractArray{S, N},
-                             ::Val{DIM}  = Val(1)) where {T, S, N, WIDTH, DIM}
+                             ::Val{DIM}  = Val(1)) where {T, S, N, WIDTH, P, DIM}
     size(x, DIM) == size(y, DIM) == size(A, 1) ||
         throw(ArgumentError("inconsistent inputs size"))
     return LinearAlgebra.mul!(y, A, x, Val(DIM), 1, 1:size(x, DIM))
