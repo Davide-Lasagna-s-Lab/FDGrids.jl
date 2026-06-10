@@ -455,6 +455,48 @@ under-filled final block.
     return threads, blocks
 end
 
+"""
+    optimal_forward_threads(y, A::DiffMatrix, x, ::Val{DIM}; max_threads=nothing)
+
+Determine the optimal number of threads required to run the
+[`_gpu_forward_kernel`](@ref).
+
+Run this function and store the results for later use when calling [`mul!`](@ref)
+with GPU data.
+"""
+function FDGrids.optimal_forward_threads(y::AbstractArray,
+                                         A::DiffMatrix{T, WIDTH},
+                                         x::AbstractArray,
+                                          ::Val{DIM};
+                               max_threads=nothing) where {T, WIDTH, DIM}
+    k = @cuda launch=false _gpu_forward_kernel!(
+        y, A.coeffs, x, Int32.(size(x)), Val(Int32(DIM)), Val(Int32(WIDTH))
+    )
+    threads = launch_configuration(k.fun).threads
+    return isnothing(max_threads) ? threads : min(threads, max_threads)
+end
+
+"""
+    optimal_adjoint_threads(y, A::DiffMatrix, x, ::Val{DIM}; max_threads=nothing)
+
+Determine the optimal number of threads required to run the
+[`_gpu_adjoint_kernel`](@ref).
+
+Run this function and store the results for later use when calling [`mul!`](@ref)
+with GPU data.
+"""
+function FDGrids.optimal_adjoint_threads(y::AbstractArray,
+                                         A::AdjointDiffMatrix{T, WIDTH},
+                                         x::AbstractArray,
+                                          ::Val{DIM};
+                               max_threads=nothing) where {T, WIDTH, DIM}
+    k = @cuda launch=false _gpu_adjoint_kernel!(
+        y, A.coeffs, x, Int32.(size(x)), Val(Int32(DIM)), Val(Int32(WIDTH))
+    )
+    threads = launch_configuration(k.fun).threads
+    return isnothing(max_threads) ? threads : min(threads, max_threads)
+end
+
 
 # ================================================================================
 # Public mul! dispatch
@@ -500,9 +542,9 @@ mul!(du, Dg, u)
 function LinearAlgebra.mul!(y::AbstractArray{S, N},
                             A::DiffMatrix{T, WIDTH, OPTIMISE, <:CuArray},
                             x::AbstractArray{S, N},
-                             ::Val{DIM}                  =Val(1);
-                            nthreads::Union{Nothing, Int}=nothing
-                            ) where {T, S, N, WIDTH, OPTIMISE, DIM}
+                             ::Val{DIM} =Val(1);
+                            nthreads::TH=nothing
+                            ) where {T, S, N, WIDTH, OPTIMISE, DIM, TH<:Union{Nothing, Int}}
     # Rank cap of 4 reflects the rank cap of the CPU code path and keeps the
     # generated kernel compilation footprint bounded. Most callers use N ≤ 3.
     N   in 1:4 || throw(ArgumentError("N must be in 1:4"))
@@ -513,12 +555,19 @@ function LinearAlgebra.mul!(y::AbstractArray{S, N},
     # the flat thread id into N-D indices without a dynamic shape query.
     sz     = Int32.(size(x))
     total  = length(x)
-    kernel = @cuda launch=false _gpu_forward_kernel!(
-        y, A.coeffs, x, sz, Val(Int32(DIM)), Val(Int32(WIDTH)))
 
-    threads, blocks = _launch_config(kernel, total, nthreads)
-    kernel(y, A.coeffs, x, sz, Val(Int32(DIM)), Val(Int32(WIDTH));
-           threads, blocks)
+    if TH <: Nothing
+        kernel = @cuda launch=false _gpu_forward_kernel!(
+            y, A.coeffs, x, sz, Val(Int32(DIM)), Val(Int32(WIDTH)))
+
+        threads, blocks = _launch_config(kernel, total, nthreads)
+        kernel(y, A.coeffs, x, sz, Val(Int32(DIM)), Val(Int32(WIDTH));
+            threads, blocks)
+    else
+        @cuda threads=nthreads blocks=cld(total, nthreads) _gpu_forward_kernel!(
+            y, A.coeffs, x, sz, Val(Int32(DIM)), Val(Int32(WIDTH))
+        )
+    end
 
     return y
 end
@@ -563,9 +612,9 @@ mul!(y, Ag, v)
 function LinearAlgebra.mul!(y::AbstractArray{S, N},
                             A::AdjointDiffMatrix{T, WIDTH, P, <:CuArray},
                             x::AbstractArray{S, N},
-                             ::Val{DIM}                  =Val(1);
-                            nthreads::Union{Nothing, Int}=nothing
-                            ) where {T, S, N, WIDTH, P, DIM}
+                             ::Val{DIM} =Val(1);
+                            nthreads::TH=nothing
+                            ) where {T, S, N, WIDTH, P, DIM, TH<:Union{Nothing, Int}}
     N   in 1:4 || throw(ArgumentError("N must be in 1:4"))
     DIM in 1:N || throw(ArgumentError("DIM must be in 1:N"))
     size(A, 1) > 2 * WIDTH ||
@@ -574,12 +623,19 @@ function LinearAlgebra.mul!(y::AbstractArray{S, N},
 
     sz     = Int32.(size(x))
     total  = length(x)
-    kernel = @cuda launch=false _gpu_adjoint_kernel!(
-        y, A.coeffs, x, sz, Val(Int32(DIM)), Val(Int32(WIDTH)))
 
-    threads, blocks = _launch_config(kernel, total, nthreads)
-    kernel(y, A.coeffs, x, sz, Val(Int32(DIM)), Val(Int32(WIDTH));
-           threads, blocks)
+    if TH <: Nothing
+        kernel = @cuda launch=false _gpu_adjoint_kernel!(
+            y, A.coeffs, x, sz, Val(Int32(DIM)), Val(Int32(WIDTH)))
+
+        threads, blocks = _launch_config(kernel, total, nthreads)
+        kernel(y, A.coeffs, x, sz, Val(Int32(DIM)), Val(Int32(WIDTH));
+            threads, blocks)
+    else
+        @cuda threads=nthreads blocks=cld(total, nthreads) _gpu_adjoint_kernel!(
+            y, A.coeffs, x, sz, Val(Int32(DIM)), Val(Int32(WIDTH))
+        )
+    end
 
     return y
 end
