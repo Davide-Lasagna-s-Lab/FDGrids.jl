@@ -25,4 +25,8 @@ export DiffMatrix,
        BandedMatrixLU,
        basis_vector
 
+# required dummy definitions to make extension methods available
+function optimal_forward_threads end
+function optimal_adjoint_threads end
+
 end

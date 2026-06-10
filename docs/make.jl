@@ -25,6 +25,7 @@ makedocs(
             "Adjoints" => "manual/adjoints.md",
             "Decomposed Domains" => "manual/decomposed-domains.md",
             "Linear Solves" => "manual/linear-solves.md",
+            "GPU Support" => "manual/gpu.md",
             "Numerical Methods" => "manual/methods.md",
             "Internal Layout and Kernels" => "manual/internals.md",
             "Benchmarks" => "manual/benchmarks.md",

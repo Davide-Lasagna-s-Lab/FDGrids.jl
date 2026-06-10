@@ -3,19 +3,18 @@ uuid = "28eb41cd-435a-4ede-8bdb-f2685fc03e8c"
 version = "0.3.2"
 authors = ["Davide Lasagna <davide.lasagna@soton.ac.uk>"]
 
+[workspace]
+projects = ["test", "benchmarks"]
+
 [deps]
+Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 
+[weakdeps]
+CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
+
+[extensions]
+FDGridsCUDAExt = "CUDA"
+
 [compat]
-julia = "1.10"
-
-[sources]
-HaloArrays = {url = "https://github.com/Davide-Lasagna-s-Lab/HaloArrays.jl.git"}
-
-[extras]
-HaloArrays = "fb8acbf3-7450-4a92-9b90-d90d6800475e"
-MPI = "da04e1cc-30fd-572f-bb4f-1f8673147195"
-Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
-
-[targets]
-test = ["HaloArrays", "MPI", "Test"]
+Adapt = "4.6.0"
