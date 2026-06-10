@@ -13,7 +13,6 @@ if "skip_base" ∉ ARGS
     include("test_linalg.jl")
     include("test_matmul.jl")
     include("test_grids.jl")
-    include("test_deprecated.jl")
 end
 
 

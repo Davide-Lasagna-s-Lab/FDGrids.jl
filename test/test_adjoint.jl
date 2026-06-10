@@ -6,7 +6,7 @@
 @testset "test AdjointDiffMatrix type               " begin
     M     = 32
     width = 5
-    xs    = gridpoints(M, -1, 1, 0.5)
+    xs, _ = grid(M, -1, 1, MappedGrid(0.5))
     D     = DiffMatrix(xs, width, 1)
     At    = adjoint(D)
 
@@ -38,18 +38,18 @@ end
 @testset "test adjoint corner cases                 " begin
     for width in (3, 5, 7)
         # exactly 2*WIDTH points — no body, should throw
-        xs_bad = gridpoints(2 * width, -1, 1, 0.5)
-        D_bad  = DiffMatrix(xs_bad, width, 1)
+        xs_bad, _ = grid(2 * width, -1, 1, MappedGrid(0.5))
+        D_bad     = DiffMatrix(xs_bad, width, 1)
         @test_throws ArgumentError adjoint(D_bad)
 
         # one below threshold, should also throw
-        xs_bad2 = gridpoints(2 * width - 1, -1, 1, 0.5)
-        D_bad2  = DiffMatrix(xs_bad2, width, 1)
+        xs_bad2, _ = grid(2 * width - 1, -1, 1, MappedGrid(0.5))
+        D_bad2     = DiffMatrix(xs_bad2, width, 1)
         @test_throws ArgumentError adjoint(D_bad2)
 
         # one above threshold: succeeds and returns AdjointDiffMatrix
-        xs_ok = gridpoints(2 * width + 1, -1, 1, 0.5)
-        D_ok  = DiffMatrix(xs_ok, width, 1)
+        xs_ok, _ = grid(2 * width + 1, -1, 1, MappedGrid(0.5))
+        D_ok     = DiffMatrix(xs_ok, width, 1)
         @test adjoint(D_ok) isa AdjointDiffMatrix{Float64, width}
     end
 end
@@ -58,7 +58,7 @@ end
     # verify (v, D w) = (D* v, w) for various orders, widths, and grids
     M = 1024
     for ORDER in (1, 2), WIDTH in (3, 5, 7),
-            xs in (range(-1, stop=1, length=M), gridpoints(M, -1, 1, 0.5))
+            xs in (range(-1, stop=1, length=M), grid(M, -1, 1, MappedGrid(0.5))[1])
         D = DiffMatrix(xs, WIDTH, ORDER)
         v = randn(M)
         w = randn(M)
@@ -76,7 +76,7 @@ end
     @testset "N=$N DIM=$DIM width=$width" for N in 1:4, DIM in 1:N, width in (3, 5, 7)
         M > 2 * width || continue
 
-        xs    = gridpoints(M, -1, 1, 0.5)
+        xs, _ = grid(M, -1, 1, MappedGrid(0.5))
         D     = DiffMatrix(xs, width, 1)
         Df    = full(D)
         shape = ntuple(d -> d == DIM ? M : OTHER, N)
@@ -104,9 +104,9 @@ end
     for M in (32, 64), width in (3, 5, 7)
         M > 2 * width || continue
 
-        xs = gridpoints(M, -1, 1, 0.5)
-        D  = DiffMatrix(xs, width, 1)
-        w  = 1.0 .+ rand(M)   # strictly positive weights
+        xs, _ = grid(M, -1, 1, MappedGrid(0.5))
+        D     = DiffMatrix(xs, width, 1)
+        w     = 1.0 .+ rand(M)   # strictly positive weights
 
         Dp = adjoint(D, w)
 
@@ -144,8 +144,8 @@ end
         @test_throws ArgumentError adjoint(D, ones(M + 1))
 
         # weighted adjoint throws when size ≤ 2*WIDTH (no body)
-        xs_bad = gridpoints(2 * width, -1, 1, 0.5)
-        D_bad  = DiffMatrix(xs_bad, width, 1)
+        xs_bad, _ = grid(2 * width, -1, 1, MappedGrid(0.5))
+        D_bad     = DiffMatrix(xs_bad, width, 1)
         @test_throws ArgumentError adjoint(D_bad, ones(2 * width))
     end
 end

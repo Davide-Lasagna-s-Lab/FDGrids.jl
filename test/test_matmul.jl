@@ -1,6 +1,6 @@
 @testset "matvec/matmat product                     " begin
     for width = (3, 5, 7)
-        D = DiffMatrix(gridpoints(50, -1, 1), width, 1)
+        D = DiffMatrix(grid(50, -1, 1, MappedGrid(0.5))[1], width, 1)
         Df = FDGrids.full(D)
 
         u = rand(50)
@@ -12,7 +12,7 @@
 end
 
 @testset "mul! accumulation mode                    " begin
-    xs = gridpoints(12, -1, 1)
+    xs, _ = grid(12, -1, 1, MappedGrid(0.5))
     D = DiffMatrix(xs, 5, 1)
     Dt = adjoint(D)
 
@@ -39,7 +39,7 @@ end
     for M in (10, 20, 30)
         for width in (3, 5, 7)
             # get grid
-            xs = gridpoints(M, -1, 1, 0.5)
+            xs, _ = grid(M, -1, 1, MappedGrid(0.5))
 
             # make grid from -1 to 1 using α = 0.5
             D = DiffMatrix(xs, width, 1)
@@ -64,7 +64,7 @@ end
         for M in (30, 40, 50)
 
             # get grid
-            xs = gridpoints(M, -1, 1, 0.5)
+            xs, _ = grid(M, -1, 1, MappedGrid(0.5))
 
             # make grid from -1 to 1 using α = 0.5
             D1 = DiffMatrix(xs, width, 1)
@@ -112,7 +112,7 @@ end
         for M in (30, 40, 50)
 
             # get grid
-            xs = gridpoints(M, -1, 1, 0.5)
+            xs, _ = grid(M, -1, 1, MappedGrid(0.5))
 
             # make grid from -1 to 1 using α = 0.5
             D1 = DiffMatrix(xs, width, 1)
@@ -183,7 +183,7 @@ end
         for M in (30, 40, 50)
 
             # get grid
-            xs = gridpoints(M, -1, 1, 0.5)
+            xs, _ = grid(M, -1, 1, MappedGrid(0.5))
 
             # make grid from -1 to 1 using α = 0.5
             D1 = DiffMatrix(xs, width, 1)
@@ -197,14 +197,14 @@ end
             fs[:, 2, 2] = exp.(1.3 .* xs)
 
             # exact first derivative
-            d1fs_EX          = copy(fs)
+            d1fs_EX            = copy(fs)
             d1fs_EX[:, 1, 1] .*= 1.0
             d1fs_EX[:, 1, 2] .*= 1.1
             d1fs_EX[:, 2, 1] .*= 1.2
             d1fs_EX[:, 2, 2] .*= 1.3
 
             # exact second derivative
-            d2fs_EX          = copy(fs)
+            d2fs_EX            = copy(fs)
             d2fs_EX[:, 1, 1] .*= 1.0^2
             d2fs_EX[:, 1, 2] .*= 1.1^2
             d2fs_EX[:, 2, 1] .*= 1.2^2
@@ -265,7 +265,7 @@ end
         for M in (30, 40, 50)
 
             # get grid
-            xs = gridpoints(M, -1, 1, 0.5)
+            xs, _ = grid(M, -1, 1, MappedGrid(0.5))
 
             # make grid from -1 to 1 using α = 0.5
             D1 = DiffMatrix(xs, width, 1)

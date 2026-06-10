@@ -1,5 +1,5 @@
 @testset "test lufact                               " begin
-    xs = gridpoints(12, -1, 1, 1)
+    xs, _ = grid(12, -1, 1, MappedGrid(1))
 
     for width in (3, 5, 7)
         # diffmatrix
@@ -23,7 +23,7 @@ end
 
 @testset "test generic banded lu                    " begin
     for M in (10, 100)
-        xs = gridpoints(M, -1, 1, 1)
+        xs, _ = grid(M, -1, 1, MappedGrid(1))
         for width in (3, 5, 7, 9)
             WD = width - 1
             D = DiffMatrix(xs, width, 2; optimise=false)
@@ -47,7 +47,7 @@ end
 
 @testset "test DiffMatrix lu                        " begin
     for M in (10, 100)
-        xs = gridpoints(M, -1, 1, 1)
+        xs, _ = grid(M, -1, 1, MappedGrid(1))
         for width in (3, 5, 7, 9)
             WD = width - 1
             D = DiffMatrix(xs, width, 2; optimise=false)
@@ -77,7 +77,7 @@ end
 
 @testset "test new lufact                           " begin
     for M in (10, 100)
-        xs = gridpoints(M, -1, 1, 1)
+        xs, _ = grid(M, -1, 1, MappedGrid(1))
         for width in (3, 5, 7, 9)
             # diffmatrix
             # test fixed to optimise=false to facilitate comparison
@@ -109,7 +109,7 @@ end
 
 @testset "test demo linsolve                        " begin
     for M in (100, 300)
-        xs = gridpoints(M, -1, 1, 1)
+        xs, _ = grid(M, -1, 1, MappedGrid(1))
         for width in (3, 5, 7, 9, 11, 13)
             # diffmatrix
             D = DiffMatrix(xs, width, 2)
@@ -159,7 +159,7 @@ end
 
         for M ∈ (10, 20, 40, 80, 160, 320)
             # points
-            xs = gridpoints(M, -1, 1, 0.5)
+            xs, _ = grid(M, -1, 1, MappedGrid(0.5))
 
             # differentiation matrices
             D1 = DiffMatrix(xs, width, 1)
