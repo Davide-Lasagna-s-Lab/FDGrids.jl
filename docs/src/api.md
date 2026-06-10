@@ -25,8 +25,8 @@ basis_vector
 ## Multiplication
 
 ```@docs
-LinearAlgebra.mul!(::AbstractArray{S, N}, ::DiffMatrix{T, WIDTH}, ::AbstractArray{S, N}, ::Val{DIM}) where {T, S, N, WIDTH, DIM}
-LinearAlgebra.mul!(::AbstractArray{T, N}, ::DiffMatrix{TD, WIDTH}, ::AbstractArray{T, N}, ::Val{DIM}, ::Int, ::UnitRange) where {T, TD, N, WIDTH, DIM}
+LinearAlgebra.mul!(::AbstractArray{S, N}, ::DiffMatrix{T, WIDTH}, ::AbstractArray{S, N}, ::Val{DIM}, ::Val{ADD}) where {T, S, N, WIDTH, DIM, ADD}
+LinearAlgebra.mul!(::AbstractArray{T, N}, ::DiffMatrix{TD, WIDTH}, ::AbstractArray{T, N}, ::Val{DIM}, ::Int, ::UnitRange, ::Val{ADD}) where {T, TD, N, WIDTH, DIM, ADD}
 LinearAlgebra.mul!(::DiffMatrix{T, WIDTH}, ::AbstractVector, ::Int) where {T, WIDTH}
 ```
 
@@ -37,18 +37,19 @@ AdjointDiffMatrix
 LinearAlgebra.adjoint(::DiffMatrix)
 LinearAlgebra.adjoint(::DiffMatrix{T, WIDTH}, ::AbstractVector{T}) where {T, WIDTH}
 LinearAlgebra.adjoint(::AdjointDiffMatrix)
-LinearAlgebra.mul!(::AbstractArray{S, N}, ::AdjointDiffMatrix{T, WIDTH}, ::AbstractArray{S, N}, ::Val{DIM}) where {T, S, N, WIDTH, DIM}
-LinearAlgebra.mul!(::AbstractArray{T, N}, ::AdjointDiffMatrix{TD, WIDTH}, ::AbstractArray{T, N}, ::Val{DIM}, ::Int, ::UnitRange) where {T, TD, N, WIDTH, DIM}
+LinearAlgebra.mul!(::AbstractArray{S, N}, ::AdjointDiffMatrix{T, WIDTH}, ::AbstractArray{S, N}, ::Val{DIM}, ::Val{ADD}) where {T, S, N, WIDTH, DIM, ADD}
+LinearAlgebra.mul!(::AbstractArray{T, N}, ::AdjointDiffMatrix{TD, WIDTH}, ::AbstractArray{T, N}, ::Val{DIM}, ::Int, ::UnitRange, ::Val{ADD}) where {T, TD, N, WIDTH, DIM, ADD}
 ```
 
 ## Linear Solves
 
 ```@docs
-LinearAlgebra.lu(::DiffMatrix)
-LinearAlgebra.ldiv!(::FDGrids.DiffMatrixLU{T, WIDTH}, ::AbstractVector{T}) where {T, WIDTH}
+DiffMatrixLU
 LinearAlgebra.lu!(::DiffMatrix)
-LinearAlgebra.ldiv!(::DiffMatrix, ::AbstractVector)
-banded_lu!
-banded_tril_solve!
-banded_triu_solve
+LinearAlgebra.ldiv!(::FDGrids.DiffMatrixLU, ::AbstractVector)
+BandedMatrixLU
+LinearAlgebra.lu!(::AbstractMatrix, ::Int, ::Int)
+LinearAlgebra.ldiv!(::FDGrids.BandedMatrixLU, ::AbstractVector)
+LinearAlgebra.lu(::DiffMatrix)
+LinearAlgebra.ldiv!(::FDGrids.DiffMatrixLULapack{T, WIDTH}, ::AbstractVector{T}) where {T, WIDTH}
 ```

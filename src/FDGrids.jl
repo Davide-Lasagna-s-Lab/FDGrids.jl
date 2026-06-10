@@ -11,6 +11,7 @@ include("grids.jl")
 include("deprecated.jl")
 
 export DiffMatrix,
+       DiffMatrixLU,
        AdjointDiffMatrix,
        AbstractGridDistribution,
        MappedGrid,
@@ -21,9 +22,7 @@ export DiffMatrix,
        full,
        quadweights,
        _quadweights,
-       banded_lu!,
-       banded_tril_solve!,
-       banded_triu_solve,
+       BandedMatrixLU,
        basis_vector
 
 # required dummy definitions to make extension methods available

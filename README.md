@@ -21,7 +21,9 @@ where a fixed one-dimensional derivative operator is applied many times.
 - Ordinary and quadrature-weighted adjoints.
 - Grid constructors with matching quadrature weights.
 - Compact banded LU factorisation and triangular solves.
-- Lower-level hooks for slab-local or decomposed-domain storage.
+- Lower-level hooks for slab-local or decomposed-domain storage with explicit
+  or halo-aware ghost-cell indexing, including in-place accumulation into an
+  existing output array.
 
 ## Installation
 
@@ -51,6 +53,26 @@ inspection and tests:
 du ≈ full(D) * u
 ```
 
+Broadcasting keeps compact storage for operations that preserve the stencil
+structure, such as combining compatible `DiffMatrix` objects or using
+`Diagonal`/`UniformScaling` operands:
+
+```julia
+L = D .+ 0.1I      # diagonal shift
+M = D .* I         # keep only the diagonal entries
+```
+
+In-place broadcast assignment writes into existing compact storage and is
+efficient for repeated assembly:
+
+```julia
+A = similar(D)
+A .= 2 .* D .- 0.1I
+```
+
+Use `full(D)` first for broadcasts that intentionally produce dense matrices,
+such as `full(D) .+ rand(size(D)...)`.
+
 The same one-dimensional operator can be applied along a chosen array axis:
 
 ```julia
@@ -59,6 +81,13 @@ u2 = [sin(x) * cos(y) for x in g.xs, y in ys]
 ux = similar(u2)
 
 mul!(ux, D, u2, Val(1))
+```
+
+Pass `Val(true)` as the final argument to add a finite-difference application
+into an existing output array:
+
+```julia
+mul!(ux, D, u2, Val(1), Val(true))
 ```
 
 Weighted adjoints use the quadrature weights returned by `grid`:

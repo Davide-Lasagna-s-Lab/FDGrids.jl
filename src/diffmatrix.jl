@@ -21,6 +21,23 @@ u  = sin.(xs)
 du = similar(u)
 mul!(du, D, u)
 ```
+
+# Broadcasting
+Broadcasting preserves the compact `DiffMatrix` container only when the result
+can still be represented by the row-local stencil storage. Supported
+matrix-shaped operands are:
+
+- compatible `DiffMatrix` objects, possibly with different stencil widths,
+- `LinearAlgebra.Diagonal`,
+- `LinearAlgebra.UniformScaling`, such as `I` or `3I`.
+
+For example, `D .+ 3I` adds to the diagonal, while `D .* I` keeps only the
+diagonal entries. Scalar multiplication such as `2 .* D` is also compact.
+In-place broadcast assignment, for example `A .= D .+ 3I` with `A::DiffMatrix`,
+writes directly into `A`'s compact coefficient storage and is intended for hot
+loops. Broadcasts that would fill structural zeros, such as `D .+ 1` or `D .+
+rand(size(D)...)`, are not compact operations; use `full(D)` first when a dense
+result is intended.
 """
 struct DiffMatrix{T, WIDTH, OPTIMISE, V<:AbstractVector{T}} <: AbstractMatrix{T}
     coeffs::V
@@ -178,18 +195,15 @@ full(A::DiffMatrix) = [A[i, j] for i in 1:size(A, 1), j in 1:size(A, 2)]
 
 struct DiffMatrixStyle{T, WIDTH, OPTIMISE} <: Broadcast.BroadcastStyle end
 
-"""
-    BroadcastStyle(::Type{<:DiffMatrix})
-
-Broadcasting over a `DiffMatrix` preserves the compact finite-difference matrix
-container whenever the result can still be represented with a compatible stencil
-width.
-"""
 Base.BroadcastStyle(::Type{<:DiffMatrix{T, WIDTH, OPTIMISE}}) where {T, WIDTH, OPTIMISE} =
     DiffMatrixStyle{T, WIDTH, OPTIMISE}()
 
+# Compact broadcast results are supported only when every matrix-shaped operand
+# can be represented in the same row-local stencil storage: scalar scaling,
+# `Diagonal`, `UniformScaling`, and compatible `DiffMatrix` objects. Dense or
+# sparse arbitrary matrices are deliberately not given this style; users should
+# call `full(D)` first if they want dense matrix broadcasting.
 Base.BroadcastStyle(::Base.Broadcast.DefaultArrayStyle{0}, s::DiffMatrixStyle) = s
-Base.BroadcastStyle(::Base.Broadcast.DefaultArrayStyle{1}, s::DiffMatrixStyle) = s
 Base.BroadcastStyle(::LinearAlgebra.StructuredMatrixStyle{<:LinearAlgebra.Diagonal}, s::DiffMatrixStyle) = s
 Base.BroadcastStyle(::DiffMatrixStyle{T1, W1, O1}, ::DiffMatrixStyle{T2, W2, O2}) where {T1, T2, W1, W2, O1, O2} =
     DiffMatrixStyle{promote_type(T1, T2), max(W1, W2), O1 || O2}()
@@ -202,3 +216,65 @@ Allocate the destination container for broadcasts whose dominant style is
 """
 Base.similar(bc::Base.Broadcast.Broadcasted{DiffMatrixStyle{T, WIDTH, OPTIMISE}}, ::Type{S}) where {T, WIDTH, OPTIMISE, S} =
     DiffMatrix{S, WIDTH, OPTIMISE}(Vector{S}(undef, axes(bc)[1][end] * WIDTH))
+
+const DiffMatrixBroadcasted = Base.Broadcast.Broadcasted{<:DiffMatrixStyle}
+const DiffMatrixBroadcastArg = Union{DiffMatrix, DiffMatrixBroadcasted}
+
+_unsupported_diffmatrix_broadcast(op, operand) =
+    throw(ArgumentError("broadcasted `$op` between a DiffMatrix and $operand cannot be represented in compact stencil storage; use `full(D)` first for dense broadcasting"))
+
+# Evaluate one lazy broadcast tree at one logical dense matrix index. This is
+# used only for entries that have storage in the destination stencil.
+@inline _bc_arg(x, I) = Base.Broadcast._broadcast_getindex(x, I)
+@inline _bc_arg(J::LinearAlgebra.UniformScaling, I) = J[I]
+@inline _bc_arg(bc::Base.Broadcast.Broadcasted, I) = bc.f(map(x -> _bc_arg(x, I), bc.args)...)
+@inline _bc_style(d::DiffMatrix{T, WIDTH, OPTIMISE}) where {T, WIDTH, OPTIMISE} =
+    DiffMatrixStyle{T, WIDTH, OPTIMISE}()
+@inline _bc_style(::Base.Broadcast.Broadcasted{Style}) where {Style <: DiffMatrixStyle} = Style()
+
+function Base.Broadcast.copyto!(dest::DiffMatrix{T, WIDTH}, bc::Base.Broadcast.Broadcasted{<:DiffMatrixStyle}) where {T, WIDTH}
+    axes(dest) == axes(bc) || throw(DimensionMismatch("array could not be broadcast to match destination"))
+
+    # Walk only the compact row-local stencil entries. For operations such as
+    # `D .* I`, off-diagonal entries inside the stencil are written as zero; any
+    # entries outside the stencil remain structural zeros because `DiffMatrix`
+    # has no storage for them.
+    N = size(dest, 1)
+    HWIDTH = WIDTH >> 1
+    @inbounds for i in 1:N
+        left = clamp(i - HWIDTH, 1, N - WIDTH + 1)
+        row = (i - 1) * WIDTH
+        for m in 1:WIDTH
+            dest.coeffs[row + m] = _bc_arg(bc, CartesianIndex(i, left + m - 1))
+        end
+    end
+    return dest
+end
+
+# `UniformScaling` has no finite axes, so Julia's default broadcast machinery
+# cannot combine it with a matrix-shaped `DiffMatrix`. Rebuild these operations
+# with the `DiffMatrix` axes; `_bc_arg` then interprets `I` by indexing it.
+for op in (:+, :-, :*)
+    @eval begin
+        Base.Broadcast.broadcasted(::typeof($op), A::DiffMatrixBroadcastArg, J::LinearAlgebra.UniformScaling) =
+            Base.Broadcast.Broadcasted{typeof(_bc_style(A))}($op, (A, J), axes(A))
+        Base.Broadcast.broadcasted(::typeof($op), J::LinearAlgebra.UniformScaling, A::DiffMatrixBroadcastArg) =
+            Base.Broadcast.Broadcasted{typeof(_bc_style(A))}($op, (J, A), axes(A))
+    end
+end
+
+for op in (:+, :-)
+    @eval begin
+        Base.Broadcast.broadcasted(::typeof($op), A::DiffMatrixBroadcastArg, x::Number) =
+            _unsupported_diffmatrix_broadcast($op, "a scalar")
+        Base.Broadcast.broadcasted(::typeof($op), x::Number, A::DiffMatrixBroadcastArg) =
+            _unsupported_diffmatrix_broadcast($op, "a scalar")
+    end
+end
+
+Base.Broadcast.copy(bc::Base.Broadcast.Broadcasted{<:DiffMatrixStyle}) =
+    Base.Broadcast.copyto!(similar(bc, Base.Broadcast.combine_eltypes(bc.f, bc.args)), bc)
+Base.Broadcast.materialize(bc::Base.Broadcast.Broadcasted{<:DiffMatrixStyle}) =
+    Base.Broadcast.copy(bc)
+Base.Broadcast.materialize!(dest::DiffMatrix, bc::Base.Broadcast.Broadcasted{<:DiffMatrixStyle}) =
+    Base.Broadcast.copyto!(dest, bc)
