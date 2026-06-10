@@ -60,7 +60,9 @@ function time_gpu(Ag, xg, yg, dim)
     # CUDA.@sync waits for the kernel to finish before @belapsed stops the
     # clock. Without it, @belapsed would measure only the host-side launch
     # overhead.
-    return @belapsed CUDA.@sync mul!($yg, $Ag, $xg, $(Val(dim))) evals=5 samples=3
+    return @belapsed begin
+        CUDA.@sync mul!($yg, $Ag, $xg, $(Val(dim)))
+    end evals=5 samples=3
 end
 
 # Build operators and arrays for a single configuration. We keep both the CPU
