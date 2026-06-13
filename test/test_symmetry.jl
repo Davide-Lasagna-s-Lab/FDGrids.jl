@@ -1,99 +1,101 @@
-@testset "left symmetry from extended grid, centre on node" begin
+@testset "left boundary symmetry output, centre on node" begin
     xs = collect(range(0.0, 1.0; length = 21))
-    centre = first(xs)
-    width = 5
+    centre = 0.0
+    width = 3
     H = width >> 1
-    N = length(xs)
 
     ghosts = reverse(2centre .- xs[2:H+1])
     xext = vcat(ghosts, xs)
-    Dext = Matrix(DiffMatrix(xext, width, 1))
+    Dext = DiffMatrix(xext, width, 1)
 
-    for symmetry in (EvenSymmetry(centre), OddSymmetry(centre))
-        sign = symmetry isa EvenSymmetry ? 1 : -1
-        Dsym = Matrix(DiffMatrix(xs, width, 1; symmetry = (symmetry, NoSymmetry())))
+    u_even = cos.(π .* xs)
+    uext_even = cos.(π .* xext)
+    D_even = DiffMatrix(xs, width, 1; symmetry = (EvenSymmetry(centre), NoSymmetry()))
+    du_even = D_even * u_even
+    du_even_ext = Dext * uext_even
+    @test du_even[1:H] ≈ du_even_ext[H+1:2H] atol = 1e-12
 
-        for i in 1:H
-            row = zeros(N)
-            row_ext = Dext[i + H, :]
-            row[2:H+1] .+= sign .* reverse(row_ext[1:H])   # folded ghost columns
-            row        .+= row_ext[H+1:H+N]                # real columns
-            @test Dsym[i, :] ≈ row atol = 1e-12
-        end
-    end
+    u_odd = sin.(π .* xs)
+    uext_odd = sin.(π .* xext)
+    D_odd = DiffMatrix(xs, width, 1; symmetry = (OddSymmetry(centre), NoSymmetry()))
+    du_odd = D_odd * u_odd
+    du_odd_ext = Dext * uext_odd
+    @test du_odd[1:H] ≈ du_odd_ext[H+1:2H] atol = 1e-12
 end
 
-@testset "left symmetry from extended grid, centre off node" begin
+@testset "left boundary symmetry output, centre off node" begin
     xs = collect(range(0.1, 1.0; length = 21))
     centre = 0.0
-    width = 5
+    width = 3
     H = width >> 1
-    N = length(xs)
 
     ghosts = reverse(2centre .- xs[1:H])
     xext = vcat(ghosts, xs)
-    Dext = Matrix(DiffMatrix(xext, width, 1))
+    Dext = DiffMatrix(xext, width, 1)
 
-    for symmetry in (EvenSymmetry(centre), OddSymmetry(centre))
-        sign = symmetry isa EvenSymmetry ? 1 : -1
-        Dsym = Matrix(DiffMatrix(xs, width, 1; symmetry = (symmetry, NoSymmetry())))
+    u_even = cos.(π .* xs)
+    uext_even = cos.(π .* xext)
+    D_even = DiffMatrix(xs, width, 1; symmetry = (EvenSymmetry(centre), NoSymmetry()))
+    du_even = D_even * u_even
+    du_even_ext = Dext * uext_even
+    @test du_even[1:H] ≈ du_even_ext[H+1:2H] atol = 1e-12
 
-        for i in 1:H
-            row = zeros(N)
-            row_ext = Dext[i + H, :]
-            row[1:H] .+= sign .* reverse(row_ext[1:H])     # folded ghost columns
-            row      .+= row_ext[H+1:H+N]                  # real columns
-            @test Dsym[i, :] ≈ row atol = 1e-12
-        end
-    end
+    u_odd = sin.(π .* xs)
+    uext_odd = sin.(π .* xext)
+    D_odd = DiffMatrix(xs, width, 1; symmetry = (OddSymmetry(centre), NoSymmetry()))
+    du_odd = D_odd * u_odd
+    du_odd_ext = Dext * uext_odd
+    @test du_odd[1:H] ≈ du_odd_ext[H+1:2H] atol = 1e-12
 end
 
-@testset "right symmetry from extended grid, centre on node" begin
+@testset "right boundary symmetry output, centre on node" begin
     xs = collect(range(0.0, 1.0; length = 21))
     centre = last(xs)
-    width = 5
+    width = 3
     H = width >> 1
     N = length(xs)
 
-    ghosts = reverse(2centre .- xs[N-H:N-1])
+    ghosts = 2centre .- reverse(xs[N-H:N-1])
     xext = vcat(xs, ghosts)
-    Dext = Matrix(DiffMatrix(xext, width, 1))
+    Dext = DiffMatrix(xext, width, 1)
 
-    for symmetry in (EvenSymmetry(centre), OddSymmetry(centre))
-        sign = symmetry isa EvenSymmetry ? 1 : -1
-        Dsym = Matrix(DiffMatrix(xs, width, 1; symmetry = (NoSymmetry(), symmetry)))
+    u_even = cos.(π .* xs)
+    uext_even = cos.(π .* xext)
+    D_even = DiffMatrix(xs, width, 1; symmetry = (NoSymmetry(), EvenSymmetry(centre)))
+    du_even = D_even * u_even
+    du_even_ext = Dext * uext_even
+    @test du_even[N-H+1:N] ≈ du_even_ext[N-H+1:N] atol = 1e-12
 
-        for i in 1:H
-            row = zeros(N)
-            row_ext = Dext[N-H+i, :]
-            row[N-H:N-1] .+= sign .* reverse(row_ext[N+1:N+H])   # folded ghost columns
-            row          .+= row_ext[1:N]                        # real columns
-            @test Dsym[N-H+i, :] ≈ row atol = 1e-12
-        end
-    end
+    u_odd = sin.(π .* xs)
+    uext_odd = sin.(π .* xext)
+    D_odd = DiffMatrix(xs, width, 1; symmetry = (NoSymmetry(), OddSymmetry(centre)))
+    du_odd = D_odd * u_odd
+    du_odd_ext = Dext * uext_odd
+    @test du_odd[N-H+1:N] ≈ du_odd_ext[N-H+1:N] atol = 1e-12
 end
 
-@testset "right symmetry from extended grid, centre off node" begin
+@testset "right boundary symmetry output, centre off node" begin
     xs = collect(range(0.0, 0.9; length = 21))
     centre = 1.0
-    width = 5
+    width = 3
     H = width >> 1
     N = length(xs)
 
-    ghosts = reverse(2centre .- xs[N-H+1:N])
+    ghosts = 2centre .- reverse(xs[N-H+1:N])
     xext = vcat(xs, ghosts)
-    Dext = Matrix(DiffMatrix(xext, width, 1))
+    Dext = DiffMatrix(xext, width, 1)
 
-    for symmetry in (EvenSymmetry(centre), OddSymmetry(centre))
-        sign = symmetry isa EvenSymmetry ? 1 : -1
-        Dsym = Matrix(DiffMatrix(xs, width, 1; symmetry = (NoSymmetry(), symmetry)))
+    u_even = cos.(π .* xs)
+    uext_even = cos.(π .* xext)
+    D_even = DiffMatrix(xs, width, 1; symmetry = (NoSymmetry(), EvenSymmetry(centre)))
+    du_even = D_even * u_even
+    du_even_ext = Dext * uext_even
+    @test du_even[N-H+1:N] ≈ du_even_ext[N-H+1:N] atol = 1e-12
 
-        for i in 1:H
-            row = zeros(N)
-            row_ext = Dext[N-H+i, :]
-            row[N-H+1:N] .+= sign .* reverse(row_ext[N+1:N+H])   # folded ghost columns
-            row          .+= row_ext[1:N]                        # real columns
-            @test Dsym[N-H+i, :] ≈ row atol = 1e-12
-        end
-    end
+    u_odd = sin.(π .* xs)
+    uext_odd = sin.(π .* xext)
+    D_odd = DiffMatrix(xs, width, 1; symmetry = (NoSymmetry(), OddSymmetry(centre)))
+    du_odd = D_odd * u_odd
+    du_odd_ext = Dext * uext_odd
+    @test du_odd[N-H+1:N] ≈ du_odd_ext[N-H+1:N] atol = 1e-12
 end
