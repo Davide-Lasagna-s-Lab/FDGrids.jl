@@ -2,6 +2,7 @@ export AbstractGridDistribution,
        MappedGrid,
        UniformGrid,
        GaussLobattoGrid,
+       ChebyshevGrid,
        grid
 
 # ================================================================================
@@ -20,6 +21,7 @@ always returning nodes and weights together so they are guaranteed to be consist
 | `MappedGrid(α, order)` | Mapped Chebyshev | yes | Composite Newton-Cotes | not guaranteed |
 | `UniformGrid()` | Equally spaced | yes | Composite trapezoidal | yes |
 | `GaussLobattoGrid()` | Chebyshev-Lobatto | yes | Clenshaw-Curtis | yes |
+| `ChebyshevGrid()` | Chebyshev-Lobatto | yes | Clenshaw-Curtis | yes |
 """
 abstract type AbstractGridDistribution end
 
@@ -94,6 +96,25 @@ D = DiffMatrix(g.xs, 5, 1)
 ```
 """
 struct GaussLobattoGrid <: AbstractGridDistribution end
+
+
+"""
+    ChebyshevGrid()
+
+Chebyshev-Lobatto grid on `[l, h]`: `M` nodes at
+
+    x_j = (l+h)/2 + (h-l)/2 * sin(pi * (2j - M + 1) / (2(M-1))),
+          j = 0, ..., M-1
+
+including both endpoints and clustered near the boundaries. The associated
+quadrature is Clenshaw-Curtis.
+
+# Examples
+```julia
+g = grid(64, -1, 1, ChebyshevGrid())
+```
+"""
+struct ChebyshevGrid <: AbstractGridDistribution end
 
 
 # ================================================================================
@@ -189,6 +210,16 @@ quadrature weights from `_clenshaw_curtis_weights`.
 """
 function _grid(M::Int, l::Float64, h::Float64, ::GaussLobattoGrid)
     xs = [(l + h) / 2 + (h - l) / 2 * cos(π * (M - 1 - j) / (M - 1))
+          for j in 0:M-1]
+    ws = _clenshaw_curtis_weights(M, l, h)
+    return (xs = xs, ws = ws)
+end
+
+
+# ---- ChebyshevGrid ----
+
+function _grid(M::Int, l::Float64, h::Float64, ::ChebyshevGrid)
+    xs = [(l + h) / 2 + (h - l) / 2 * sin(π * (2j - M + 1) / (2 * (M - 1)))
           for j in 0:M-1]
     ws = _clenshaw_curtis_weights(M, l, h)
     return (xs = xs, ws = ws)
