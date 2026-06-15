@@ -2,7 +2,10 @@
     M = 64
     l = -1.0
     h =  2.0
+    R0 = 0.2
+    R = 2.0
     I_exp = exp(h) - exp(l)   # ∫_l^h exp(x) dx, used throughout
+    I_radial_exp = (R - 1) * exp(R) - (R0 - 1) * exp(R0) # ∫_R0^R exp(r) r dr
 
     # ---- return type and named tuple fields ----
     for dist in (MappedGrid(0.5), MappedGrid(0.5, 2), UniformGrid(), GaussLobattoGrid(), ChebyshevGrid())
@@ -13,6 +16,12 @@
         @test length(result.xs) == M
         @test length(result.ws) == M
     end
+    result = grid(M, R0, R, RadialChebyshevGrid())
+    @test result isa NamedTuple
+    @test haskey(result, :xs)
+    @test haskey(result, :ws)
+    @test length(result.xs) == M
+    @test length(result.ws) == M
 
     # ---- points are sorted ascending and within [l, h] ----
     for dist in (MappedGrid(0.5), UniformGrid(), GaussLobattoGrid(), ChebyshevGrid())
@@ -21,12 +30,18 @@
         @test xs[1]   ≈ l
         @test xs[end] ≈ h
     end
+    xs, _ = grid(M, R0, R, RadialChebyshevGrid())
+    @test issorted(xs)
+    @test R0 < xs[1]
+    @test xs[end] ≈ R
 
     # ---- weights sum to interval length (∫_l^h 1 dx = h - l) ----
     for dist in (MappedGrid(0.5), MappedGrid(0.5, 2), UniformGrid(), GaussLobattoGrid(), ChebyshevGrid())
         _, ws = grid(M, l, h, dist)
         @test sum(ws) ≈ h - l  atol=1e-12
     end
+    xs, ws = grid(M, R0, R, RadialChebyshevGrid())
+    @test sum(exp.(xs) .* ws) ≈ I_radial_exp atol=1e-3
 
     # ---- UniformGrid: weights always strictly positive ----
     _, ws = grid(M, l, h, UniformGrid())
@@ -36,6 +51,8 @@
     _, ws = grid(M, l, h, GaussLobattoGrid())
     @test all(ws .> 0)
     _, ws = grid(M, l, h, ChebyshevGrid())
+    @test all(ws .> 0)
+    _, ws = grid(M, R0, R, RadialChebyshevGrid())
     @test all(ws .> 0)
 
     # ---- UniformGrid: correct trapezoidal structure ----
@@ -58,6 +75,23 @@
     expected = [(l + h) / 2 + (h - l) / 2 * sin(π * (2j - M + 1) / (2 * (M - 1)))
                 for j in 0:M-1]
     @test xs ≈ expected atol=1e-14
+
+    # ---- RadialChebyshevGrid: half-Chebyshev radial coordinates and weights ----
+    g = grid(M, 0.0, R, RadialChebyshevGrid())
+    outer = grid(2M, -R, R, ChebyshevGrid())
+    r_outer = outer.xs[M+1:end]
+    dr_outer = outer.ws[M+1:end]
+    @test g.xs ≈ r_outer
+    @test g.ws ≈ r_outer .* dr_outer
+
+    annulus = grid(M, R0, R, RadialChebyshevGrid())
+    inner = grid(2M, -R0, R0, ChebyshevGrid())
+    r_inner = inner.xs[M+1:end]
+    dr_inner = inner.ws[M+1:end]
+    expected_xs = R0 .+ r_outer .- r_inner
+    expected_ws = expected_xs .* (dr_outer .- dr_inner)
+    @test annulus.xs ≈ expected_xs
+    @test annulus.ws ≈ expected_ws
 
     # ---- MappedGrid order parameter ----
     # order=1 (trapezoidal) should be less accurate than order=4 for exp
@@ -94,6 +128,9 @@
     # ---- error handling ----
     @test_throws ArgumentError grid(1, l, h, GaussLobattoGrid())   # M < 2
     @test_throws ArgumentError grid(M, h, l, GaussLobattoGrid())   # l > h
+    @test_throws ArgumentError grid(M, -0.1, R, RadialChebyshevGrid()) # R0 < 0
+    @test_throws ArgumentError grid(M, R0, -R, RadialChebyshevGrid())  # R < 0
+    @test_throws ArgumentError grid(M, R, R0, RadialChebyshevGrid())   # R < R0
     @test_throws ArgumentError MappedGrid(0.0)                     # α = 0
     @test_throws ArgumentError MappedGrid(1.5)                     # α > 1
     @test_throws ArgumentError MappedGrid(0.5, 0)                  # order < 1

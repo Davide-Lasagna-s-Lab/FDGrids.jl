@@ -3,6 +3,7 @@ export AbstractGridDistribution,
        UniformGrid,
        GaussLobattoGrid,
        ChebyshevGrid,
+       RadialChebyshevGrid,
        grid
 
 # ================================================================================
@@ -22,6 +23,7 @@ always returning nodes and weights together so they are guaranteed to be consist
 | `UniformGrid()` | Equally spaced | yes | Composite trapezoidal | yes |
 | `GaussLobattoGrid()` | Chebyshev-Lobatto | yes | Clenshaw-Curtis | yes |
 | `ChebyshevGrid()` | Chebyshev-Lobatto | yes | Clenshaw-Curtis | yes |
+| `RadialChebyshevGrid()` | Radial Chebyshev-Lobatto | see docstring | radial measure Clenshaw-Curtis | yes |
 """
 abstract type AbstractGridDistribution end
 
@@ -115,6 +117,28 @@ g = grid(64, -1, 1, ChebyshevGrid())
 ```
 """
 struct ChebyshevGrid <: AbstractGridDistribution end
+
+
+"""
+    RadialChebyshevGrid()
+
+Luhar-style radial Chebyshev grid on `[R0, R]`. For each radius, the grid uses
+the positive half of a `2M`-point Chebyshev-Lobatto grid on `[-A, A]`. An
+annulus is built by applying that construction to both `A = R0` and `A = R`,
+then using the difference between the two radial coordinate grids. The inner
+endpoint is omitted and the outer endpoint is included.
+
+The returned weights include the cylindrical radial measure:
+
+    sum(f.(g.xs) .* g.ws) ≈ integral_R0^R f(r) r dr.
+
+# Examples
+```julia
+g = grid(64, 0, 1, RadialChebyshevGrid())      # solid disk/pipe
+g = grid(64, 0.2, 1, RadialChebyshevGrid())    # annulus
+```
+"""
+struct RadialChebyshevGrid <: AbstractGridDistribution end
 
 
 # ================================================================================
@@ -222,6 +246,30 @@ function _grid(M::Int, l::Float64, h::Float64, ::ChebyshevGrid)
     xs = [(l + h) / 2 + (h - l) / 2 * sin(π * (2j - M + 1) / (2 * (M - 1)))
           for j in 0:M-1]
     ws = _clenshaw_curtis_weights(M, l, h)
+    return (xs = xs, ws = ws)
+end
+
+
+# ---- RadialChebyshevGrid ----
+
+function _grid(M::Int, l::Float64, h::Float64, ::RadialChebyshevGrid)
+    0 ≤ l < h || throw(ArgumentError("RadialChebyshevGrid requires 0 ≤ l < h"))
+
+    outer = _grid(2M, -h, h, ChebyshevGrid())
+    r_outer = outer.xs[M+1:end]
+    dr_outer = outer.ws[M+1:end]
+
+    xs = r_outer
+    dr = dr_outer
+    if !iszero(l)
+        inner = _grid(2M, -l, l, ChebyshevGrid())
+        r_inner = inner.xs[M+1:end]
+        dr_inner = inner.ws[M+1:end]
+        xs = l .+ r_outer .- r_inner
+        dr = dr_outer .- dr_inner
+    end
+
+    ws = xs .* dr
     return (xs = xs, ws = ws)
 end
 
