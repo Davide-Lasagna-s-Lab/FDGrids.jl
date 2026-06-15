@@ -52,8 +52,6 @@ end
 struct MissingOddSymmetry <: Symmetry end
 OddSymmetry() = MissingOddSymmetry()
 
-const NO_SYMMETRY = (NoSymmetry(), NoSymmetry())
-
 # The point a side is mirrored about. `NoSymmetry` carries no centre.
 centre(::NoSymmetry) = nothing
 centre(s::EvenSymmetry) = s.centre
@@ -114,14 +112,14 @@ grid nodes; out-of-range `m` are ghost nodes reflected about the centre `c`:
 
 A ghost node maps back to a real column `j` (`xs[j]`), and its finite-difference
 weight is folded onto column `j` with sign `+1` (even) or `-1` (odd). Returns `C`
-unchanged when `symmetry == NO_SYMMETRY`.
+unchanged when `symmetry == (NoSymmetry(), NoSymmetry())`.
 
 This is a lightweight mirror stencil: it only rewrites the active sides' boundary
 rows in place, never building ghost-point objects or touching interior rows. It
 is not a full boundary-condition system and not pipe-specific regularity.
 """
 function apply_symmetry_stencil!(C, xs, width::Int, order::Int, symmetry)
-    symmetry == NO_SYMMETRY && return C
+    symmetry == (NoSymmetry(), NoSymmetry()) && return C
 
     N      = length(xs)
     HWIDTH = width >> 1

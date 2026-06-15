@@ -34,7 +34,6 @@ export DiffMatrix,
        Symmetry,
        NoSymmetry,
        EvenSymmetry,
-       OddSymmetry,
-       NO_SYMMETRY
+       OddSymmetry
 
 end

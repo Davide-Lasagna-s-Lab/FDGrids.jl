@@ -50,7 +50,7 @@ struct DiffMatrix{T, WIDTH, OPTIMISE} <: AbstractMatrix{T}
 
     """
         DiffMatrix(xs, width, order; optimise=true, eltype=Float64,
-                   symmetry=NO_SYMMETRY)
+                   symmetry=(NoSymmetry(), NoSymmetry()))
 
     Construct a finite-difference differentiation matrix on `xs` of the given
     stencil `width` and derivative `order`.
@@ -63,7 +63,7 @@ struct DiffMatrix{T, WIDTH, OPTIMISE} <: AbstractMatrix{T}
     # Keyword Arguments
     - `optimise::Bool=true`: pre-invert the diagonal of U during LU factorisation.
     - `eltype::Type=Float64`: element type of the coefficients.
-    - `symmetry=NO_SYMMETRY`: `(left, right)` boundary symmetry, each a `Symmetry`
+    - `symmetry=(NoSymmetry(), NoSymmetry())`: `(left, right)` boundary symmetry, each a `Symmetry`
       object. A `NoSymmetry()` side keeps its one-sided boundary rows unchanged;
       `EvenSymmetry(c)`/`OddSymmetry(c)` rewrites that side's boundary rows with a
       stencil mirrored about the centre `c`. The centre is required and must be
@@ -84,7 +84,7 @@ struct DiffMatrix{T, WIDTH, OPTIMISE} <: AbstractMatrix{T}
     function DiffMatrix(xs::AbstractVector, width::Int, order::Int;
                         optimise::Bool = true,
                         eltype::Type   = Float64,
-                        symmetry       = NO_SYMMETRY)
+                        symmetry       = (NoSymmetry(), NoSymmetry()))
         3 ≤ width          || throw(ArgumentError("width must be ≥ 3"))
         width % 2 == 1     || throw(ArgumentError("width must be odd"))
         width ≤ length(xs) || throw(ArgumentError("width must not exceed the number of grid points"))
@@ -99,7 +99,7 @@ struct DiffMatrix{T, WIDTH, OPTIMISE} <: AbstractMatrix{T}
     end
 
     DiffMatrix{T, WIDTH, OPTIMISE}(coeffs::Vector{T},
-                                   symmetry::Tuple{Symmetry, Symmetry} = NO_SYMMETRY) where {T, WIDTH, OPTIMISE} =
+                                   symmetry::Tuple{Symmetry, Symmetry} = (NoSymmetry(), NoSymmetry())) where {T, WIDTH, OPTIMISE} =
         new{T, WIDTH, OPTIMISE}(coeffs, symmetry)
 end
 
