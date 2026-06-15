@@ -95,7 +95,7 @@ This is a lightweight mirror stencil: it only rewrites the active sides' boundar
 rows in place, never building ghost-point objects or touching interior rows. It
 is not a full boundary-condition system and not pipe-specific regularity.
 """
-function apply_symmetry_stencil!(C, xs, width::Int, order::Int, symmetry)
+function apply_symmetry_stencil!(C, xs, width::Int, order::Int, symmetry::Tuple{Symmetry, Symmetry})
     symmetry == (NoSymmetry(), NoSymmetry()) && return C
 
     N      = length(xs)
