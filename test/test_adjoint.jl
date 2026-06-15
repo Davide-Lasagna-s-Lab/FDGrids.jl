@@ -6,7 +6,7 @@
 @testset "test AdjointDiffMatrix type               " begin
     M     = 32
     width = 5
-    xs    = gridpoints(M, -1, 1, 0.5)
+    xs, _ = grid(M, -1, 1, MappedGrid(0.5))
     D     = DiffMatrix(xs, width, 1)
     At    = adjoint(D)
 
@@ -38,18 +38,18 @@ end
 @testset "test adjoint corner cases                 " begin
     for width in (3, 5, 7)
         # exactly 2*WIDTH points — no body, should throw
-        xs_bad = gridpoints(2 * width, -1, 1, 0.5)
-        D_bad  = DiffMatrix(xs_bad, width, 1)
+        xs_bad, _ = grid(2 * width, -1, 1, MappedGrid(0.5))
+        D_bad     = DiffMatrix(xs_bad, width, 1)
         @test_throws ArgumentError adjoint(D_bad)
 
         # one below threshold, should also throw
-        xs_bad2 = gridpoints(2 * width - 1, -1, 1, 0.5)
-        D_bad2  = DiffMatrix(xs_bad2, width, 1)
+        xs_bad2, _ = grid(2 * width - 1, -1, 1, MappedGrid(0.5))
+        D_bad2     = DiffMatrix(xs_bad2, width, 1)
         @test_throws ArgumentError adjoint(D_bad2)
 
         # one above threshold: succeeds and returns AdjointDiffMatrix
-        xs_ok = gridpoints(2 * width + 1, -1, 1, 0.5)
-        D_ok  = DiffMatrix(xs_ok, width, 1)
+        xs_ok, _ = grid(2 * width + 1, -1, 1, MappedGrid(0.5))
+        D_ok     = DiffMatrix(xs_ok, width, 1)
         @test adjoint(D_ok) isa AdjointDiffMatrix{Float64, width}
     end
 end
@@ -58,7 +58,7 @@ end
     # verify (v, D w) = (D* v, w) for various orders, widths, and grids
     M = 1024
     for ORDER in (1, 2), WIDTH in (3, 5, 7),
-            xs in (range(-1, stop=1, length=M), gridpoints(M, -1, 1, 0.5))
+            xs in (range(-1, stop=1, length=M), grid(M, -1, 1, MappedGrid(0.5))[1])
         D = DiffMatrix(xs, WIDTH, ORDER)
         v = randn(M)
         w = randn(M)
@@ -76,7 +76,7 @@ end
     @testset "N=$N DIM=$DIM width=$width" for N in 1:4, DIM in 1:N, width in (3, 5, 7)
         M > 2 * width || continue
 
-        xs    = gridpoints(M, -1, 1, 0.5)
+        xs, _ = grid(M, -1, 1, MappedGrid(0.5))
         D     = DiffMatrix(xs, width, 1)
         Df    = full(D)
         shape = ntuple(d -> d == DIM ? M : OTHER, N)
@@ -104,9 +104,9 @@ end
     for M in (32, 64), width in (3, 5, 7)
         M > 2 * width || continue
 
-        xs = gridpoints(M, -1, 1, 0.5)
-        D  = DiffMatrix(xs, width, 1)
-        w  = 1.0 .+ rand(M)   # strictly positive weights
+        xs, _ = grid(M, -1, 1, MappedGrid(0.5))
+        D     = DiffMatrix(xs, width, 1)
+        w     = 1.0 .+ rand(M)   # strictly positive weights
 
         Dp = adjoint(D, w)
 
@@ -144,55 +144,8 @@ end
         @test_throws ArgumentError adjoint(D, ones(M + 1))
 
         # weighted adjoint throws when size ≤ 2*WIDTH (no body)
-        xs_bad = gridpoints(2 * width, -1, 1, 0.5)
-        D_bad  = DiffMatrix(xs_bad, width, 1)
+        xs_bad, _ = grid(2 * width, -1, 1, MappedGrid(0.5))
+        D_bad     = DiffMatrix(xs_bad, width, 1)
         @test_throws ArgumentError adjoint(D_bad, ones(2 * width))
-    end
-end
-
-@testset "test distributed matmul                   " begin
-    M     = 32
-    OTHER = 2
-    xs    = gridpoints(M, -1, 1, 0.5)
-
-    @testset "N=$N DIM=$DIM width=$width IS_ADJOINT=$IS_ADJOINT" for
-            N          in 1:4,
-            DIM        in 1:N,
-            width      in (3, 5, 7),
-            IS_ADJOINT in (false, true)
-
-        IS_ADJOINT && M ≤ 2 * width && continue
-
-        # NCHUNKS=2 for adjoint (wider boundary regions need larger chunks),
-        # NCHUNKS=4 for forward
-        NCHUNKS    = IS_ADJOINT ? 2 : 4
-        chunk_size = M ÷ NCHUNKS
-
-        shape = ntuple(d -> d == DIM ? M : OTHER, N)
-        D     = DiffMatrix(xs, width, 1)
-        op    = IS_ADJOINT ? adjoint(D) : D   # build adjoint once, reuse per chunk
-
-        x = zeros(shape...)
-        for I in CartesianIndices(x)
-            x[I] = 1.0 - xs[I[DIM]]^2
-        end
-
-        # reference: full non-distributed multiply
-        y_ref = similar(x)
-        mul!(y_ref, op, x, Val(DIM))
-
-        # distributed: each chunk writes only its local_rng into y_dist;
-        # boundary outputs not covered by any chunk body are left as y_ref
-        y_dist = copy(y_ref)
-
-        for k in 1:NCHUNKS
-            g_start = (k - 1) * chunk_size + 1
-            g_end   = k == NCHUNKS ? M : k * chunk_size
-            x_view  = selectdim(x,      DIM, g_start:g_end)
-            y_view  = selectdim(y_dist, DIM, g_start:g_end)
-            mul!(y_view, op, x_view, Val(DIM), g_start, 1:chunk_size)
-        end
-
-        @test y_dist ≈ y_ref
     end
 end

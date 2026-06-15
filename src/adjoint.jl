@@ -1,5 +1,5 @@
 """
-    AdjointDiffMatrix{T, WIDTH} <: AbstractMatrix{T}
+    AdjointDiffMatrix{T, WIDTH, P, V} <: AbstractMatrix{T}
 
 Transposed finite-difference differentiation matrix D*, constructed from a
 `DiffMatrix` by `adjoint(D)`.
@@ -10,6 +10,10 @@ diagonal weights `w`, representing `W^-1 * transpose(D) * W`.
 The parent `DiffMatrix` is retained so `adjoint(A::AdjointDiffMatrix)` can
 return the original operator without copying. For weighted adjoints this is a
 structural unwrap, not the standard Euclidean adjoint of the weighted operator.
+
+`P` is the concrete parent `DiffMatrix` type and `V` is the backing vector
+type. They are parameters so the type can wrap GPU storage (e.g. `CuArray`)
+without changing the public API; CPU code only relies on `T` and `WIDTH`.
 
 Coefficients for the transpose operator are stored in a single flat vector
 `coeffs` of length `N*WIDTH`. For each output j (1..N), the contributing
@@ -33,10 +37,27 @@ y = similar(collect(xs))
 mul!(y, Dt, sin.(xs))
 ```
 """
-struct AdjointDiffMatrix{T, WIDTH} <: AbstractMatrix{T}
-    parent :: DiffMatrix{T, WIDTH}
-    coeffs :: Vector{T}            # length N*WIDTH, output-major order
+struct AdjointDiffMatrix{T, WIDTH,
+                         P<:DiffMatrix{T, WIDTH},
+                         V<:AbstractVector{T}} <: AbstractMatrix{T}
+    parent :: P
+    coeffs :: V
+
+    # bypass constructor useful for CUDA adaptation (see ext/FDGridsCUDAExt.jl)
+    AdjointDiffMatrix{T, WIDTH, P, V}(parent::P, coeffs::V) where
+        {T, WIDTH, P<:DiffMatrix{T, WIDTH}, V<:AbstractVector{T}} =
+            new{T, WIDTH, P, V}(parent, coeffs)
 end
+
+"""
+    AdjointDiffMatrix(parent, coeffs) -> AdjointDiffMatrix
+
+Construct an `AdjointDiffMatrix` directly from a parent `DiffMatrix` and a
+precomputed coefficient vector. The element type `T` and stencil width `WIDTH`
+are inferred from `parent`; the storage type `V` is inferred from `coeffs`.
+"""
+AdjointDiffMatrix(parent::DiffMatrix{T, WIDTH}, coeffs::AbstractVector{T}) where {T, WIDTH} =
+    AdjointDiffMatrix{T, WIDTH, typeof(parent), typeof(coeffs)}(parent, coeffs)
 
 
 # ================================================================================

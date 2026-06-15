@@ -48,6 +48,7 @@ du ≈ full(D) * u
 | [Adjoints](manual/adjoints.md) | Ordinary and weighted adjoints. |
 | [Linear Solves](manual/linear-solves.md) | Compact banded LU, pivoting, and boundary value problems. |
 | [Decomposed Domains](manual/decomposed-domains.md) | Applying operators to slab-local arrays with halos. |
+| [GPU Support](manual/gpu.md) | Running forward and adjoint `mul!` on NVIDIA GPUs. |
 | [Numerical Methods](manual/methods.md) | The algorithms and mathematical assumptions. |
 | [Internal Layout and Kernels](manual/internals.md) | Storage layouts, generated kernels, and implementation invariants. |
 | [Benchmarks](manual/benchmarks.md) | Performance methodology and results. |
