@@ -67,14 +67,9 @@ function validate_symmetry(symmetry)
     return symmetry
 end
 
-symmetry(D) = D.symmetry
-symmetry_left(D)  = D.symmetry[1]
-symmetry_right(D) = D.symmetry[2]
-
-# The recorded centre of each side; `nothing` when the side is `NoSymmetry`.
-symmetry_centre(D) = (centre(D.symmetry[1]), centre(D.symmetry[2]))
-symmetry_centre_left(D)  = centre(D.symmetry[1])
-symmetry_centre_right(D) = centre(D.symmetry[2])
+symmetry(diffmatrix) = diffmatrix.symmetry
+symmetry_left(diffmatrix)  = diffmatrix.symmetry[1]
+symmetry_right(diffmatrix) = diffmatrix.symmetry[2]
 
 """
     apply_symmetry_stencil!(C, xs, width, order, symmetry) -> C
