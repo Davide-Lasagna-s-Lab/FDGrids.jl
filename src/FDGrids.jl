@@ -29,13 +29,10 @@ export DiffMatrix,
        symmetry,
        symmetry_left,
        symmetry_right,
-       symmetry_centre,
-       symmetry_centre_left,
-       symmetry_centre_right,
+       centre,
        Symmetry,
        NoSymmetry,
        EvenSymmetry,
-       OddSymmetry,
-       NO_SYMMETRY
+       OddSymmetry
 
 end

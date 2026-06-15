@@ -34,8 +34,6 @@ symmetry.
 struct EvenSymmetry{C<:Real} <: Symmetry
     centre :: C
 end
-struct MissingEvenSymmetry <: Symmetry end
-EvenSymmetry() = MissingEvenSymmetry()
 
 """
     OddSymmetry(centre)
@@ -49,33 +47,15 @@ symmetry.
 struct OddSymmetry{C<:Real} <: Symmetry
     centre :: C
 end
-struct MissingOddSymmetry <: Symmetry end
-OddSymmetry() = MissingOddSymmetry()
-
-const NO_SYMMETRY = (NoSymmetry(), NoSymmetry())
 
 # The point a side is mirrored about. `NoSymmetry` carries no centre.
 centre(::NoSymmetry) = nothing
 centre(s::EvenSymmetry) = s.centre
 centre(s::OddSymmetry)  = s.centre
-centre(::MissingEvenSymmetry) = nothing
-centre(::MissingOddSymmetry)  = nothing
 
 # Sign applied to a reflected (ghost) node's finite-difference weight.
 ghost_sign(::EvenSymmetry) = 1.0
 ghost_sign(::OddSymmetry)  = -1.0
-
-symmetry_name(::EvenSymmetry) = "EvenSymmetry"
-symmetry_name(::OddSymmetry) = "OddSymmetry"
-symmetry_name(::MissingEvenSymmetry) = "EvenSymmetry"
-symmetry_name(::MissingOddSymmetry) = "OddSymmetry"
-
-function checked_symmetry_centre(sym::Symmetry, side::Symbol)
-    if sym isa MissingEvenSymmetry || sym isa MissingOddSymmetry
-        throw(ArgumentError("$(side) $(symmetry_name(sym)) requires an explicit centre"))
-    end
-    return float(centre(sym))
-end
 
 function validate_symmetry(symmetry)
     symmetry isa Tuple && length(symmetry) == 2 ||
@@ -87,14 +67,9 @@ function validate_symmetry(symmetry)
     return symmetry
 end
 
-symmetry(D) = D.symmetry
-symmetry_left(D)  = D.symmetry[1]
-symmetry_right(D) = D.symmetry[2]
-
-# The recorded centre of each side; `nothing` when the side is `NoSymmetry`.
-symmetry_centre(D) = (centre(D.symmetry[1]), centre(D.symmetry[2]))
-symmetry_centre_left(D)  = centre(D.symmetry[1])
-symmetry_centre_right(D) = centre(D.symmetry[2])
+symmetry(diffmatrix) = diffmatrix.symmetry
+symmetry_left(diffmatrix)  = diffmatrix.symmetry[1]
+symmetry_right(diffmatrix) = diffmatrix.symmetry[2]
 
 """
     apply_symmetry_stencil!(C, xs, width, order, symmetry) -> C
@@ -114,14 +89,14 @@ grid nodes; out-of-range `m` are ghost nodes reflected about the centre `c`:
 
 A ghost node maps back to a real column `j` (`xs[j]`), and its finite-difference
 weight is folded onto column `j` with sign `+1` (even) or `-1` (odd). Returns `C`
-unchanged when `symmetry == NO_SYMMETRY`.
+unchanged when `symmetry == (NoSymmetry(), NoSymmetry())`.
 
 This is a lightweight mirror stencil: it only rewrites the active sides' boundary
 rows in place, never building ghost-point objects or touching interior rows. It
 is not a full boundary-condition system and not pipe-specific regularity.
 """
-function apply_symmetry_stencil!(C, xs, width::Int, order::Int, symmetry)
-    symmetry == NO_SYMMETRY && return C
+function apply_symmetry_stencil!(C, xs, width::Int, order::Int, symmetry::Tuple{Symmetry, Symmetry})
+    symmetry == (NoSymmetry(), NoSymmetry()) && return C
 
     N      = length(xs)
     HWIDTH = width >> 1
@@ -130,7 +105,7 @@ function apply_symmetry_stencil!(C, xs, width::Int, order::Int, symmetry)
     # Guard against a centre placed inside the grid, which would make the mirror
     # stencil ambiguous. Only checked for active sides.
     if !(symL isa NoSymmetry)
-        cL = checked_symmetry_centre(symL, :left)
+        cL = float(centre(symL))
         cL ≤ first(xs) ||
             throw(ArgumentError("left symmetry centre must satisfy c ≤ first(xs)"))
         for i in 1:HWIDTH
@@ -138,7 +113,7 @@ function apply_symmetry_stencil!(C, xs, width::Int, order::Int, symmetry)
         end
     end
     if !(symR isa NoSymmetry)
-        cR = checked_symmetry_centre(symR, :right)
+        cR = float(centre(symR))
         cR ≥ last(xs) ||
             throw(ArgumentError("right symmetry centre must satisfy c ≥ last(xs)"))
         for i in (N - HWIDTH + 1):N
