@@ -2,7 +2,6 @@ export AbstractGridDistribution,
        MappedGrid,
        UniformGrid,
        GaussLobattoGrid,
-       HalfChebyshevGrid,
        grid
 
 # ================================================================================
@@ -21,7 +20,6 @@ always returning nodes and weights together so they are guaranteed to be consist
 | `MappedGrid(α, order)` | Mapped Chebyshev | yes | Composite Newton-Cotes | not guaranteed |
 | `UniformGrid()` | Equally spaced | yes | Composite trapezoidal | yes |
 | `GaussLobattoGrid()` | Chebyshev-Lobatto | yes | Clenshaw-Curtis | yes |
-| `HalfChebyshevGrid(halfwidth)` | Half-Chebyshev pipe radial | right only | local radial quadrature | usually |
 """
 abstract type AbstractGridDistribution end
 
@@ -98,38 +96,6 @@ D = DiffMatrix(g.xs, 5, 1)
 struct GaussLobattoGrid <: AbstractGridDistribution end
 
 
-"""
-    HalfChebyshevGrid(halfwidth=4)
-
-Half-Chebyshev radial grid for pipe geometry. Nodes lie on `(0, R]`, so the
-centreline is omitted and the wall point is included. The default node placement
-takes the last `M` points from a slightly larger Chebyshev-like grid with
-`M + floor(sqrt(M))` points, then applies a centreline shift ten times.
-
-The weights returned by `grid(M, 0, R, HalfChebyshevGrid())` approximate the
-cylindrical radial measure
-
-    integral_0^R f(r) r dr.
-
-They are local radial-measure quadrature weights, not plain `dr` quadrature
-weights. Use `DiffMatrix` with `EvenSymmetry(0)` or `OddSymmetry(0)` on the left
-boundary to construct centreline-aware finite-difference operators.
-
-# Examples
-```julia
-g = grid(64, 0, 1, HalfChebyshevGrid())
-D = DiffMatrix(g.xs, 2 * 4 + 1, 1; symmetry = (EvenSymmetry(0), NoSymmetry()))
-```
-"""
-struct HalfChebyshevGrid <: AbstractGridDistribution
-    halfwidth::Int
-    function HalfChebyshevGrid(halfwidth::Int = 4)
-        halfwidth ≥ 2 || throw(ArgumentError("halfwidth must be ≥ 2"))
-        return new(halfwidth)
-    end
-end
-
-
 # ================================================================================
 # Main API: grid(M, l, h, dist) -> (xs, ws)
 # ================================================================================
@@ -150,9 +116,7 @@ together, ensuring they are guaranteed to be consistent.
 A named tuple `(xs = points, ws = weights)` where:
 - `xs[i]` is the `i`-th grid point in ascending order.
 - `ws[i]` is the quadrature weight at `xs[i]`, so that `sum(f.(xs) .* ws)`
-  approximates `∫_l^h f(x) dx` for standard one-dimensional distributions.
-  Geometry-specific distributions may document a different measure; for example,
-  `HalfChebyshevGrid` uses the pipe radial measure `r dr`.
+  approximates `∫_l^h f(x) dx`.
 
 # Examples
 ```julia
@@ -227,26 +191,6 @@ function _grid(M::Int, l::Float64, h::Float64, ::GaussLobattoGrid)
     xs = [(l + h) / 2 + (h - l) / 2 * cos(π * (M - 1 - j) / (M - 1))
           for j in 0:M-1]
     ws = _clenshaw_curtis_weights(M, l, h)
-    return (xs = xs, ws = ws)
-end
-
-
-# ---- HalfChebyshevGrid ----
-
-"""
-    _grid(M, l, h, g::HalfChebyshevGrid) -> (xs, ws)
-
-Internal implementation for the half-Chebyshev pipe radial grid. The lower
-endpoint must be the centreline (`l == 0`), and the weights approximate
-`integral_0^h f(r) r dr`.
-"""
-function _grid(M::Int, l::Float64, h::Float64, g::HalfChebyshevGrid)
-    iszero(l) || throw(ArgumentError("HalfChebyshevGrid is a pipe radial grid and requires l == 0"))
-    g.halfwidth < M || throw(ArgumentError("M must be greater than halfwidth"))
-
-    ρs = _half_chebyshev_pipe_nodes(M)
-    xs = h .* ρs
-    ws = h^2 .* _half_chebyshev_radial_weights(ρs, g.halfwidth)
     return (xs = xs, ws = ws)
 end
 
@@ -337,66 +281,3 @@ function _quadweights_panel(xs::AbstractVector)
     A = [xs[i]^d for d in 0:N-1, i in 1:N]
     return A \ b
 end
-
-
-# ================================================================================
-# Half-Chebyshev pipe radial grid
-# ================================================================================
-
-function _half_chebyshev_pipe_nodes(M::Int)
-    M_ = M + floor(Int, sqrt(M))
-    xs = [0.5 * (1 + cos(π * (M - j) / M_)) for j in 1:M]
-
-    for _ in 1:10
-        δ = 1.5 * xs[1] - 0.5 * xs[2]
-        @. xs = xs * (1 + δ) - δ
-    end
-
-    return xs
-end
-
-
-function _half_chebyshev_radial_weights(xs::AbstractVector, halfwidth::Int)
-    N = length(xs)
-    ws = zeros(Float64, N)
-    xext = _half_chebyshev_extended_nodes(xs, halfwidth)
-
-    for n in 1:N
-        left  = max(1, n - halfwidth)
-        right = min(n + halfwidth, N)
-        nodes = view(xext, _half_chebyshev_ext_index(left, halfwidth):_half_chebyshev_ext_index(right, halfwidth))
-        x0    = xext[_half_chebyshev_ext_index(n, halfwidth)]
-        nn    = length(nodes)
-        A     = Matrix{Float64}(undef, nn, nn)
-
-        for i in 1:nn
-            A[i, :] .= get_weights(x0, nodes, i - 1)[:, i]
-        end
-
-        c = 1.0
-        e = 1.0
-        xnext = xext[_half_chebyshev_ext_index(min(n + 1, N), halfwidth)]
-        xprev = xext[_half_chebyshev_ext_index(max(n - 1, 0), halfwidth)]
-        for i in 1:nn
-            c *= (xnext - x0) / i
-            e *= (xprev - x0) / i
-            @views ws[left:right] .+= 0.5 * (c - e) .* A[i, :] .* x0
-        end
-    end
-
-    return ws
-end
-
-
-function _half_chebyshev_extended_nodes(xs::AbstractVector, halfwidth::Int)
-    N = length(xs)
-    xext = Vector{Float64}(undef, N + halfwidth)
-    for j in 1:halfwidth
-        xext[j] = -xs[halfwidth - j + 1]
-    end
-    xext[halfwidth + 1:end] .= xs
-    return xext
-end
-
-
-_half_chebyshev_ext_index(i::Int, halfwidth::Int) = i + halfwidth
