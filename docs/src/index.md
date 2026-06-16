@@ -45,6 +45,7 @@ du ≈ full(D) * u
 | [Scope and Limitations](manual/scope.md) | What the package does and deliberately does not do. |
 | [Grids and Quadrature](manual/grids.md) | Choosing grid distributions and paired quadrature weights. |
 | [Finite-Difference Operators](manual/diffmatrix.md) | Constructing and applying `DiffMatrix` objects. |
+| [Boundary Symmetry](manual/symmetry.md) | Even/odd mirror stencils for boundary rows. |
 | [Adjoints](manual/adjoints.md) | Ordinary and weighted adjoints. |
 | [Linear Solves](manual/linear-solves.md) | Compact banded LU, pivoting, and boundary value problems. |
 | [Decomposed Domains](manual/decomposed-domains.md) | Applying operators to slab-local arrays with halos. |

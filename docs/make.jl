@@ -22,6 +22,7 @@ makedocs(
             "Scope and Limitations" => "manual/scope.md",
             "Grids and Quadrature" => "manual/grids.md",
             "Finite-Difference Operators" => "manual/diffmatrix.md",
+            "Boundary Symmetry" => "manual/symmetry.md",
             "Adjoints" => "manual/adjoints.md",
             "Decomposed Domains" => "manual/decomposed-domains.md",
             "Linear Solves" => "manual/linear-solves.md",

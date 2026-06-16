@@ -10,6 +10,7 @@ reused efficiently across vectors and array fibers.
 - Compact `DiffMatrix` storage with fixed-width row stencils.
 - Generated `mul!` kernels for vectors and arrays of arbitrary rank.
 - Ordinary and weighted adjoints without forming dense matrices.
+- Even/odd boundary mirror stencils for fields with a known parity at a wall.
 - Grid constructors with quadrature weights that match the node distribution.
 - Compact no-pivot banded LU for repeated solves.
 - Slab-local multiplication when an external code manages halo values.

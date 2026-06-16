@@ -25,7 +25,9 @@ size(D)
 
 The example constructs a first-derivative operator with a five-point stencil.
 Interior rows are centered; boundary rows use one-sided stencils of the same
-width.
+width. When the field has a known parity at a wall, those boundary rows can be
+replaced with even/odd mirror stencils via the `symmetry` keyword — see
+[Boundary Symmetry](symmetry.md).
 
 ## Applying to Vectors
 
