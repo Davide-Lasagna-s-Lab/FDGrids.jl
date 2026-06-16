@@ -1,5 +1,5 @@
 """
-    DiffMatrix{T, WIDTH, OPTIMISE} <: AbstractMatrix{T}
+    DiffMatrix{T, WIDTH, OPTIMISE, V} <: AbstractMatrix{T}
 
 Compact representation of a banded NxN  finite-difference differentiation matrix
 with stencil width `WIDTH`.
@@ -39,68 +39,74 @@ loops. Broadcasts that would fill structural zeros, such as `D .+ 1` or `D .+
 rand(size(D)...)`, are not compact operations; use `full(D)` first when a dense
 result is intended.
 """
-struct DiffMatrix{T, WIDTH, OPTIMISE} <: AbstractMatrix{T}
-    coeffs :: Vector{T}
+struct DiffMatrix{T, WIDTH, OPTIMISE, V<:AbstractVector{T}} <: AbstractMatrix{T}
+    coeffs::V
     # `(left, right)` boundary symmetry; see `src/symmetry.jl`. This is a runtime
     # field (not a type parameter) and the main switch: a `NoSymmetry()` side
     # leaves its coefficients unchanged, while `EvenSymmetry(c)`/`OddSymmetry(c)`
     # rewrites that side's boundary rows mirrored about the centre `c`. Interior
     # rows are never changed.
-    symmetry :: Tuple{Symmetry, Symmetry}
+    symmetry::Tuple{Symmetry, Symmetry}
 
-    """
-        DiffMatrix(xs, width, order; optimise=true, eltype=Float64,
-                   symmetry=(NoSymmetry(), NoSymmetry()))
+    # Bypass constructor useful for CUDA adaptation (see ext/FDGridsCUDAExt.jl).
+    DiffMatrix{T, WIDTH, OPTIMISE}(
+        coeffs::V,
+        symmetry::Tuple{Symmetry, Symmetry} = (NoSymmetry(), NoSymmetry()),
+    ) where {T, WIDTH, OPTIMISE, V<:AbstractVector{T}} =
+        new{T, WIDTH, OPTIMISE, V}(coeffs, symmetry)
+end
 
-    Construct a finite-difference differentiation matrix on `xs` of the given
-    stencil `width` and derivative `order`.
+"""
+    DiffMatrix(xs, width, order, ::Type{T}=Float64; optimise=true,
+               eltype=T, symmetry=(NoSymmetry(), NoSymmetry()))
 
-    The grid points in `xs` may be non-uniform, but they should be distinct and
-    ordered consistently with the arrays to which the operator will be applied.
-    By default the boundary rows use one-sided stencils of the same width; the
-    `symmetry` keyword can replace those rows with mirror stencils.
+Construct a finite-difference differentiation matrix on `xs` of the given
+stencil `width` and derivative `order`.
 
-    # Keyword Arguments
-    - `optimise::Bool=true`: pre-invert the diagonal of U during LU factorisation.
-    - `eltype::Type=Float64`: element type of the coefficients.
-    - `symmetry=(NoSymmetry(), NoSymmetry())`: `(left, right)` boundary symmetry, each a `Symmetry`
-      object. A `NoSymmetry()` side keeps its one-sided boundary rows unchanged;
-      `EvenSymmetry(c)`/`OddSymmetry(c)` rewrites that side's boundary rows with a
-      stencil mirrored about the centre `c`. The centre is required and must be
-      a `Real`; use `xs[1]` on the left or `xs[end]` on the right for boundary-
-      centred symmetry. For an active side it must lie at or beyond the boundary
-      node (`c ≤ xs[1]` on the left, `c ≥ xs[end]` on the right). Interior rows
-      are never affected.
-      This is a lightweight mirror stencil, not a full boundary-condition system
-      and not pipe-specific regularity.
+The grid points in `xs` may be non-uniform, but they should be distinct and
+ordered consistently with the arrays to which the operator will be applied.
+By default the boundary rows use one-sided stencils of the same width; the
+`symmetry` keyword can replace those rows with mirror stencils.
 
-    # Examples
-    ```julia
-    xs = grid(32, -1, 1, GaussLobattoGrid()).xs
-    D2 = DiffMatrix(xs, 7, 2; eltype = Float64)
-    Ds = DiffMatrix(xs, 5, 1; symmetry = (EvenSymmetry(-1), NoSymmetry()))
-    ```
-    """
-    function DiffMatrix(xs::AbstractVector, width::Int, order::Int;
-                        optimise::Bool = true,
-                        eltype::Type   = Float64,
-                        symmetry       = (NoSymmetry(), NoSymmetry()))
-        3 ≤ width          || throw(ArgumentError("width must be ≥ 3"))
-        width % 2 == 1     || throw(ArgumentError("width must be odd"))
-        width ≤ length(xs) || throw(ArgumentError("width must not exceed the number of grid points"))
+# Keyword Arguments
+- `optimise::Bool=true`: pre-invert the diagonal of U during LU factorisation.
+- `eltype::Type=T`: element type of the coefficients.
+- `symmetry=(NoSymmetry(), NoSymmetry())`: `(left, right)` boundary symmetry,
+  each a `Symmetry` object. A `NoSymmetry()` side keeps its one-sided boundary
+  rows unchanged; `EvenSymmetry(c)`/`OddSymmetry(c)` rewrites that side's
+  boundary rows with a stencil mirrored about the centre `c`. The centre is
+  required and must be a `Real`; use `xs[1]` on the left or `xs[end]` on the
+  right for boundary-centred symmetry. For an active side it must lie at or
+  beyond the boundary node (`c ≤ xs[1]` on the left, `c ≥ xs[end]` on the right).
+  Interior rows are never affected.
+  This is a lightweight mirror stencil, not a full boundary-condition system and
+  not pipe-specific regularity.
 
-        symmetry = validate_symmetry(symmetry)
+# Examples
+```julia
+xs = grid(32, -1, 1, GaussLobattoGrid()).xs
+D2 = DiffMatrix(xs, 7, 2, Float64)
+Ds = DiffMatrix(xs, 5, 1; symmetry = (EvenSymmetry(-1), NoSymmetry()))
+```
+"""
+function DiffMatrix(xs::AbstractVector,
+                 width::Int,
+                 order::Int,
+                      ::Type{T}=Float64;
+              optimise::Bool   =true,
+              eltype::Type     =T,
+              symmetry          =(NoSymmetry(), NoSymmetry())) where {T}
+    3 ≤ width          || throw(ArgumentError("width must be ≥ 3"))
+    width % 2 == 1     || throw(ArgumentError("width must be odd"))
+    width ≤ length(xs) || throw(ArgumentError("width must not exceed the number of grid points"))
 
-        raw = get_coeffs(xs, width, order)
-        apply_symmetry_stencil!(raw, xs, width, order, symmetry)
-        coeffs = eltype.(vec(raw))
+    symmetry = validate_symmetry(symmetry)
 
-        return new{eltype, width, optimise}(coeffs, symmetry)
-    end
+    raw = get_coeffs(xs, width, order)
+    apply_symmetry_stencil!(raw, xs, width, order, symmetry)
+    coeffs = eltype.(vec(raw))
 
-    DiffMatrix{T, WIDTH, OPTIMISE}(coeffs::Vector{T},
-                                   symmetry::Tuple{Symmetry, Symmetry} = (NoSymmetry(), NoSymmetry())) where {T, WIDTH, OPTIMISE} =
-        new{T, WIDTH, OPTIMISE}(coeffs, symmetry)
+    return DiffMatrix{eltype, width, optimise}(coeffs, symmetry)
 end
 
 

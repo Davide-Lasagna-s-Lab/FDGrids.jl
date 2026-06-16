@@ -16,6 +16,21 @@ function _make_ref(array, expr, DIM, N)
 end
 
 
+"""
+    _local_range(global_rng, global_idx, local_rng) -> UnitRange
+
+Translate the intersection of a global row range with `local_rng` into local
+indices. `global_idx` is the global row represented by local index `1`.
+"""
+@inline function _local_range(global_rng::UnitRange,
+                              global_idx::Int,
+                              local_rng::UnitRange)
+    first_local = first(global_rng) - global_idx + 1
+    last_local  = last(global_rng)  - global_idx + 1
+    return max(first(local_rng), first_local):min(last(local_rng), last_local)
+end
+
+
 # ================================================================================
 # KERNEL BUILDERS
 # ================================================================================
@@ -88,15 +103,18 @@ function _make_loop_expr_forward(DIM, N, WIDTH, ADD)
     HWIDTH = WIDTH >> 1
 
     preamble = quote
-        # Split the local rows into the same three regions used by DiffMatrix:
-        # a left-boundary head, a centered body, and a right-boundary tail.
-        # In decomposed-domain calls, local_rng may cover only a subset of the
-        # local storage. global_idx maps local index 1 to the global row number.
-        head_range = max(1, local_rng[1]):min($HWIDTH, local_rng[end])
-        body_range = max($HWIDTH + 1, local_rng[1]):min(size(x, $DIM) - $HWIDTH, local_rng[end])
-        tail_range = max(size(x, $DIM) - $HWIDTH + 1, local_rng[1]):min(size(x, $DIM), local_rng[end])
-        has_head   = global_idx == 1 && local_rng[1] ≤ $HWIDTH
-        has_tail   = global_idx + local_rng[end] - 1 > size(A, 1) - $HWIDTH
+        # DiffMatrix has three global regions: a left-boundary head, a centered
+        # body, and a right-boundary tail. Translate their intersections with
+        # this slab back to local indices. This keeps a middle slab in the body
+        # even when a halo-aware array exposes ghost cells outside its axes.
+        head_range = _local_range(1:$HWIDTH,
+                                  global_idx, local_rng)
+        body_range = _local_range(($HWIDTH + 1):(size(A, 1) - $HWIDTH),
+                                  global_idx, local_rng)
+        tail_range = _local_range((size(A, 1) - $HWIDTH + 1):size(A, 1),
+                                  global_idx, local_rng)
+        has_head   = !isempty(head_range)
+        has_tail   = !isempty(tail_range)
 
         # The coefficient pointer is global-row based. Find the first local row
         # that this call will actually compute and jump directly to its row in
@@ -170,13 +188,18 @@ function _make_loop_expr_adjoint(DIM, N, WIDTH, ADD)
     HWIDTH = WIDTH >> 1
 
     preamble = quote
-        # Adjoint output rows use variable-length head/tail regions. The body
-        # has fixed WIDTH coefficients, but the first/last WIDTH rows do not.
-        head_range = max(1, local_rng[1]):min($WIDTH, local_rng[end])
-        body_range = max($WIDTH + 1, local_rng[1]):min(size(x, $DIM) - $WIDTH, local_rng[end])
-        tail_range = max(size(x, $DIM) - $WIDTH + 1, local_rng[1]):min(size(x, $DIM), local_rng[end])
-        has_head   = global_idx == 1 && local_rng[1] ≤ $WIDTH
-        has_tail   = global_idx + local_rng[end] - 1 > size(A, 1) - $WIDTH
+        # Adjoint output rows use variable-length global head/tail regions.
+        # Translate their intersections with this slab back to local indices.
+        # The body has fixed WIDTH coefficients, but the first/last WIDTH rows
+        # do not.
+        head_range = _local_range(1:$WIDTH,
+                                  global_idx, local_rng)
+        body_range = _local_range(($WIDTH + 1):(size(A, 1) - $WIDTH),
+                                  global_idx, local_rng)
+        tail_range = _local_range((size(A, 1) - $WIDTH + 1):size(A, 1),
+                                  global_idx, local_rng)
+        has_head   = !isempty(head_range)
+        has_tail   = !isempty(tail_range)
 
         # Unlike the forward operator, the pointer cannot be computed by a
         # simple WIDTH stride in the head/tail. _ptr_for_j encodes the compact
@@ -283,8 +306,7 @@ end
 """
     LinearAlgebra.mul!(y, A::DiffMatrix, x, ::Val{DIM}, global_idx, local_rng, ::Val{ADD}=Val(false)) -> y
 
-Distribution-aware backend for the forward operator. `@generated` for the concrete
-`(T, N, WIDTH, DIM, ADD)` combination.
+Apply the forward operator to selected rows of domain-decomposed storage.
 
 - `global_idx`: global row index corresponding to local index `1` of `x`/`y`.
 - `local_rng`: local portion of dimension `DIM` to process.
@@ -292,6 +314,11 @@ Distribution-aware backend for the forward operator. `@generated` for the concre
 
 This method is intended for domain-decomposed callers. Ordinary local arrays
 should use `mul!(y, A, x, Val(DIM))`.
+
+`x` must provide every stencil entry needed to evaluate `local_rng`. It may
+store halo rows inside its ordinary axes and shift `local_rng` inward, or expose
+ghost cells through halo-aware scalar indices outside those axes. In both
+cases, `global_idx` describes local index `1`, not `first(local_rng)`.
 """
 @generated function LinearAlgebra.mul!(y::AbstractArray{T, N},
                                        A::DiffMatrix{TD, WIDTH},
@@ -349,10 +376,10 @@ mul!(y, Dt, cos.(xs))
 ```
 """
 function LinearAlgebra.mul!(y::AbstractArray{S, N},
-                            A::AdjointDiffMatrix{T, WIDTH},
+                            A::AdjointDiffMatrix{T, WIDTH, P, <:AbstractArray},
                             x::AbstractArray{S, N},
                              ::Val{DIM}  = Val(1),
-                             ::Val{ADD}  = Val(false)) where {T, S, N, WIDTH, DIM, ADD}
+                             ::Val{ADD}  = Val(false)) where {T, S, N, WIDTH, P, DIM, ADD}
     size(x, DIM) == size(y, DIM) == size(A, 1) ||
         throw(ArgumentError("inconsistent inputs size"))
     return LinearAlgebra.mul!(y, A, x, Val(DIM), 1, 1:size(x, DIM), Val(ADD))
@@ -361,8 +388,7 @@ end
 """
     LinearAlgebra.mul!(y, A::AdjointDiffMatrix, x, ::Val{DIM}, global_idx, local_rng, ::Val{ADD}=Val(false)) -> y
 
-Distribution-aware backend for the adjoint operator. `@generated` for the concrete
-`(T, N, WIDTH, DIM, ADD)` combination.
+Apply the adjoint operator to selected rows of domain-decomposed storage.
 
 - `global_idx`: global row index corresponding to local index `1` of `x`/`y`.
 - `local_rng`: local portion of dimension `DIM` to process.
@@ -370,6 +396,11 @@ Distribution-aware backend for the adjoint operator. `@generated` for the concre
 
 This method is intended for distributed or slab-local application of an adjoint
 operator. Ordinary local arrays should use `mul!(y, A, x, Val(DIM))`.
+
+`x` must provide every stencil entry needed to evaluate `local_rng`. It may
+store halo rows inside its ordinary axes and shift `local_rng` inward, or expose
+ghost cells through halo-aware scalar indices outside those axes. In both
+cases, `global_idx` describes local index `1`, not `first(local_rng)`.
 """
 @generated function LinearAlgebra.mul!(y::AbstractArray{T, N},
                                        A::AdjointDiffMatrix{TD, WIDTH},

@@ -2,7 +2,7 @@
     for M = 3:10
         for width = 3:2:9
             if M > width
-                xs = gridpoints(M, -1, 1, 1)
+                xs, _ = grid(M, -1, 1, MappedGrid(1))
 
                 # diffmatrix
                 D = DiffMatrix(xs, width, 1)
@@ -20,7 +20,7 @@ end
 
 @testset "slicing                                   " begin
     # points
-    xs = gridpoints(10, -1, 1, 1)
+    xs, _ = grid(10, -1, 1, MappedGrid(1))
 
     # diffmatrix
     D = DiffMatrix(xs, 3, 1)
@@ -37,15 +37,15 @@ end
 end
 
 @testset "algebra                                   " begin
-    xs = gridpoints(6, -1, 1, 1)
+    xs, _ = grid(6, -1, 1, MappedGrid(1))
 
     # diffmatrix
     D = DiffMatrix(xs, 3, 1)
 
-    @test typeof(D)                             == DiffMatrix{Float64, 3, true}
-    @test typeof(D + 3*I)                       == DiffMatrix{Float64, 3, true}
-    @test typeof(D + D)                         == DiffMatrix{Float64, 3, true}
-    @test typeof(D + 3*D)                       == DiffMatrix{Float64, 3, true}
+    @test typeof(D)       <: DiffMatrix{Float64, 3, true}
+    @test typeof(D + 3*I) <: DiffMatrix{Float64, 3, true}
+    @test typeof(D + D)   <: DiffMatrix{Float64, 3, true}
+    @test typeof(D + 3*D) <: DiffMatrix{Float64, 3, true}
 
     #  different width
     DA = DiffMatrix(xs, 3, 1)
@@ -57,7 +57,7 @@ end
     DA = DiffMatrix(xs, 3, 1; optimise=true)
     DB = DiffMatrix(xs, 3, 1; optimise=false)
 
-    @test typeof(D + D) == DiffMatrix{Float64, 3, true}
+    @test typeof(D + D) <: DiffMatrix{Float64, 3, true}
 end
 
 _uniformscaling_broadcast_dotted!(A, D, θ₀, θ₁) = (A .= θ₀ .* D .- θ₁ .* I; A)
@@ -69,7 +69,7 @@ _diffmatrix_pair_broadcast!(A, DA, DB) = (A .= 2 .* DA .- 3 .* DB; A)
 
 @testset "compact structured broadcast              " begin
     for M in (10, 32), width in (3, 5, 7)
-        xs = gridpoints(M, -1, 1, 1)
+        xs, _ = grid(M, -1, 1, MappedGrid(1))
         D  = DiffMatrix(xs, width, 2)
         θ₀, θ₁ = 2.5, 1.3
         J = θ₁ * I
@@ -146,13 +146,13 @@ _diffmatrix_pair_broadcast!(A, DA, DB) = (A .= 2 .* DA .- 3 .* DB; A)
         @test A6 isa DiffMatrix
     end
 
-    D = DiffMatrix(gridpoints(8, -1, 1, 1), 3, 1)
+    D = DiffMatrix(grid(8, -1, 1, MappedGrid(1))[1], 3, 1)
     @test_throws ArgumentError D .+ rand(8, 8)
     @test_throws ArgumentError rand(8, 8) .+ D
     @test_throws ArgumentError D .+ 1
     @test_throws ArgumentError 1 .- D
     @test_throws ArgumentError D .+ rand(8)
-    @test_throws DimensionMismatch D .+ DiffMatrix(gridpoints(9, -1, 1, 1), 3, 1)
+    @test_throws DimensionMismatch D .+ DiffMatrix(grid(9, -1, 1, MappedGrid(1))[1], 3, 1)
     @test_throws DimensionMismatch D .+ Diagonal(rand(9))
 end
 
@@ -161,7 +161,7 @@ end
     width = 3
 
     # get grid
-    xs = gridpoints(M, -1, 1, 0.5)
+    xs, _ = grid(M, -1, 1, MappedGrid(0.5))
 
     # make grid from -1 to 1 using α = 0.5
     D1 = DiffMatrix(xs, width, 1)

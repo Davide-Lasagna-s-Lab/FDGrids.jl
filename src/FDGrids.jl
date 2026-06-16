@@ -9,7 +9,8 @@ include("adjoint.jl")
 include("linalg.jl")
 include("matmul.jl")
 include("grids.jl")
-include("deprecated.jl")
+
+include("deprecated/deprecated.jl")
 
 export DiffMatrix,
        DiffMatrixLU,
@@ -35,5 +36,9 @@ export DiffMatrix,
        NoSymmetry,
        EvenSymmetry,
        OddSymmetry
+
+# required dummy definitions to make extension methods available
+function optimal_forward_threads end
+function optimal_adjoint_threads end
 
 end

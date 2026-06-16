@@ -22,8 +22,11 @@ where a fixed one-dimensional derivative operator is applied many times.
 - Ordinary and quadrature-weighted adjoints.
 - Grid constructors with matching quadrature weights.
 - Compact banded LU factorisation and triangular solves.
-- Lower-level hooks for slab-local or decomposed-domain storage, including
-  in-place accumulation into an existing output array.
+- Lower-level hooks for slab-local or decomposed-domain storage with explicit
+  or halo-aware ghost-cell indexing, including in-place accumulation into an
+  existing output array.
+- Optional CUDA extension: forward and adjoint `mul!` on NVIDIA GPUs with
+  automatic dispatch — no code changes required beyond `using CUDA`.
 
 ## Installation
 
@@ -116,6 +119,33 @@ Weighted adjoints use the quadrature weights returned by `grid`:
 Dp = adjoint(D, g.ws)
 ```
 
+## GPU Support
+
+Loading `CUDA` alongside `FDGrids` activates the optional CUDA extension.
+The same `mul!` calls work unchanged on GPU arrays:
+
+```julia
+using FDGrids, CUDA, LinearAlgebra
+
+g  = grid(256, -1, 1, GaussLobattoGrid())
+D  = DiffMatrix(g.xs, 5, 1)
+Dg = cu(D)                              # Float32 on device (use Adapt.adapt for Float64)
+
+u  = CuArray(Float32.(sin.(g.xs)))
+du = similar(u)
+mul!(du, Dg, u)                         # dispatches to the GPU kernel automatically
+```
+
+The adjoint transfers and applies the same way:
+
+```julia
+Ag = cu(adjoint(D, g.ws))              # weighted adjoint on GPU
+mul!(du, Ag, u)
+```
+
+See [GPU Support](docs/src/manual/gpu.md) for transfer options, limitations,
+and launch-configuration tuning.
+
 ## Documentation
 
 The full documentation is available at the
@@ -129,8 +159,10 @@ Useful entry points:
 - [Adjoints](docs/src/manual/adjoints.md)
 - [Linear Solves](docs/src/manual/linear-solves.md)
 - [Decomposed Domains](docs/src/manual/decomposed-domains.md)
+- [GPU Support](docs/src/manual/gpu.md)
 - [Numerical Methods](docs/src/manual/methods.md)
 - [Internal Layout and Kernels](docs/src/manual/internals.md)
+- [Benchmarks](docs/src/manual/benchmarks.md)
 - [API Reference](docs/src/api.md)
 
 ## Implementation Overview
