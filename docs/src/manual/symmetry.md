@@ -23,6 +23,13 @@ A boundary side is described by a [`Symmetry`](@ref) object:
 | [`EvenSymmetry`](@ref)`(c)` | ``u(2c - x) = u(x)`` | even mirror about centre `c` |
 | [`OddSymmetry`](@ref)`(c)` | ``u(2c - x) = -u(x)`` | odd mirror about centre `c` |
 
+The reflection is written as the mirror of an absolute coordinate,
+``x \mapsto 2c - x``, because that is exactly what the stencil computes — a ghost
+node at ``x`` maps to the real node at ``2c - x``. Measuring displacement from
+the centre instead, this is the familiar ``u(c - x) = u(c + x)`` (even) and
+``u(c - x) = -u(c + x)`` (odd); the two forms are identical under
+``x \to c + x``.
+
 The `symmetry` keyword of `DiffMatrix` takes a `(left, right)` tuple of these
 objects, one per boundary:
 

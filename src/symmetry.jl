@@ -25,7 +25,8 @@ struct NoSymmetry <: Symmetry end
 """
     EvenSymmetry(centre)
 
-Even (`u(2c - x) = u(x)`) boundary symmetry about `centre`.
+Even (`u(2c - x) = u(x)`, equivalently `u(c - x) = u(c + x)`) boundary symmetry
+about `centre`.
 
 `centre` must be supplied explicitly and must be a `Real`. Use `xs[1]` for a
 left boundary-centred symmetry or `xs[end]` for a right boundary-centred
@@ -38,7 +39,8 @@ end
 """
     OddSymmetry(centre)
 
-Odd (`u(2c - x) = -u(x)`) boundary symmetry about `centre`.
+Odd (`u(2c - x) = -u(x)`, equivalently `u(c - x) = -u(c + x)`) boundary symmetry
+about `centre`.
 
 `centre` must be supplied explicitly and must be a `Real`. Use `xs[1]` for a
 left boundary-centred symmetry or `xs[end]` for a right boundary-centred
