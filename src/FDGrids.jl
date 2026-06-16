@@ -3,6 +3,7 @@ module FDGrids
 import LinearAlgebra
 
 include("utils.jl")
+include("symmetry.jl")
 include("diffmatrix.jl")
 include("adjoint.jl")
 include("linalg.jl")
@@ -24,7 +25,15 @@ export DiffMatrix,
        quadweights,
        _quadweights,
        BandedMatrixLU,
-       basis_vector
+       basis_vector,
+       symmetry,
+       symmetry_left,
+       symmetry_right,
+       centre,
+       Symmetry,
+       NoSymmetry,
+       EvenSymmetry,
+       OddSymmetry
 
 # required dummy definitions to make extension methods available
 function optimal_forward_threads end

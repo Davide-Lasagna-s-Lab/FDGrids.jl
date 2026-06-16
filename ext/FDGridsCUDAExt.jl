@@ -66,7 +66,7 @@ function Adapt.adapt_structure(to, d::DiffMatrix{T, WIDTH, OPTIMISE}) where {T, 
     # eltype afterwards so precision-changing adaptors do not produce a
     # type-inconsistent wrapper.
     coeffs = Adapt.adapt(to, d.coeffs)
-    return DiffMatrix{eltype(coeffs), WIDTH, OPTIMISE}(coeffs)
+    return DiffMatrix{eltype(coeffs), WIDTH, OPTIMISE}(coeffs, d.symmetry)
 end
 
 """
@@ -119,7 +119,7 @@ function CUDA.cu(d::DiffMatrix{T, WIDTH, OPTIMISE}) where {T, WIDTH, OPTIMISE}
     # array) is normalised to a plain host vector before `cu` performs the
     # precision-changing transfer.
     coeffs = CUDA.cu(Array(d.coeffs))
-    return DiffMatrix{eltype(coeffs), WIDTH, OPTIMISE}(coeffs)
+    return DiffMatrix{eltype(coeffs), WIDTH, OPTIMISE}(coeffs, d.symmetry)
 end
 
 """
