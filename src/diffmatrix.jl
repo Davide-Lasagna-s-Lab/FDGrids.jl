@@ -95,19 +95,40 @@ function DiffMatrix(xs::AbstractVector,
                       ::Type{T}=Float64;
               optimise::Bool   =true,
               eltype::Type     =T,
-              symmetry          =(NoSymmetry(), NoSymmetry())) where {T}
+              symmetry::Tuple{Symmetry, Symmetry} = (NoSymmetry(), NoSymmetry())) where {T}
     3 ≤ width          || throw(ArgumentError("width must be ≥ 3"))
     width % 2 == 1     || throw(ArgumentError("width must be odd"))
     width ≤ length(xs) || throw(ArgumentError("width must not exceed the number of grid points"))
 
-    symmetry = validate_symmetry(symmetry)
-
     raw = get_coeffs(xs, width, order)
-    apply_symmetry_stencil!(raw, xs, width, order, symmetry)
+    _apply_symmetry_stencil!(raw, xs, width, order, symmetry)
     coeffs = eltype.(vec(raw))
 
     return DiffMatrix{eltype, width, optimise}(coeffs, symmetry)
 end
+
+"""
+    symmetry(D::DiffMatrix) -> (left, right)
+
+Return the `(left, right)` tuple of boundary [`Symmetry`](@ref) objects attached
+to `D`. The default for an operator built without the `symmetry` keyword is
+`(NoSymmetry(), NoSymmetry())`.
+"""
+symmetry(D::DiffMatrix) = D.symmetry
+
+"""
+    symmetry_left(D::DiffMatrix) -> Symmetry
+
+Return the left-boundary [`Symmetry`](@ref) of `D`, i.e. `symmetry(D)[1]`.
+"""
+symmetry_left(D::DiffMatrix)  = D.symmetry[1]
+
+"""
+    symmetry_right(D::DiffMatrix) -> Symmetry
+
+Return the right-boundary [`Symmetry`](@ref) of `D`, i.e. `symmetry(D)[2]`.
+"""
+symmetry_right(D::DiffMatrix) = D.symmetry[2]
 
 
 # ================================================================================

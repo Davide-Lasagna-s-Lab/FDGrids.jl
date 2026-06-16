@@ -3,7 +3,7 @@
 # A boundary's symmetry is described by a `Symmetry` object: `NoSymmetry()`
 # leaves that side untouched, while `EvenSymmetry(c)`/`OddSymmetry(c)` rewrite
 # that side's boundary rows with a centred stencil whose out-of-range nodes are
-# mirrored about the centre `c` (see `apply_symmetry_stencil!`). The `symmetry`
+# mirrored about the centre `c` (see `_apply_symmetry_stencil!`). The `symmetry`
 # field of a `DiffMatrix` holds a `(left, right)` tuple of these objects and is
 # the main switch; interior rows and `NoSymmetry()` sides are left untouched.
 
@@ -25,7 +25,8 @@ struct NoSymmetry <: Symmetry end
 """
     EvenSymmetry(centre)
 
-Even (`u(2c - x) = u(x)`) boundary symmetry about `centre`.
+Even (`u(2c - x) = u(x)`, equivalently `u(c - x) = u(c + x)`) boundary symmetry
+about `centre`.
 
 `centre` must be supplied explicitly and must be a `Real`. Use `xs[1]` for a
 left boundary-centred symmetry or `xs[end]` for a right boundary-centred
@@ -38,7 +39,8 @@ end
 """
     OddSymmetry(centre)
 
-Odd (`u(2c - x) = -u(x)`) boundary symmetry about `centre`.
+Odd (`u(2c - x) = -u(x)`, equivalently `u(c - x) = -u(c + x)`) boundary symmetry
+about `centre`.
 
 `centre` must be supplied explicitly and must be a `Real`. Use `xs[1]` for a
 left boundary-centred symmetry or `xs[end]` for a right boundary-centred
@@ -48,31 +50,19 @@ struct OddSymmetry{C<:Real} <: Symmetry
     centre :: C
 end
 
-# The point a side is mirrored about. `NoSymmetry` carries no centre.
+"""
+    centre(s::Symmetry)
+
+Return the point a boundary side is mirrored about: the stored `centre` for
+`EvenSymmetry`/`OddSymmetry`, and `nothing` for `NoSymmetry` (which carries no
+centre).
+"""
 centre(::NoSymmetry) = nothing
 centre(s::EvenSymmetry) = s.centre
 centre(s::OddSymmetry)  = s.centre
 
-# Sign applied to a reflected (ghost) node's finite-difference weight.
-ghost_sign(::EvenSymmetry) = 1.0
-ghost_sign(::OddSymmetry)  = -1.0
-
-function validate_symmetry(symmetry)
-    symmetry isa Tuple && length(symmetry) == 2 ||
-        throw(ArgumentError("symmetry must be a (left, right) tuple"))
-
-    all(s -> s isa Symmetry, symmetry) ||
-        throw(ArgumentError("symmetry entries must be NoSymmetry, EvenSymmetry, or OddSymmetry"))
-
-    return symmetry
-end
-
-symmetry(diffmatrix) = diffmatrix.symmetry
-symmetry_left(diffmatrix)  = diffmatrix.symmetry[1]
-symmetry_right(diffmatrix) = diffmatrix.symmetry[2]
-
 """
-    apply_symmetry_stencil!(C, xs, width, order, symmetry) -> C
+    _apply_symmetry_stencil!(C, xs, width, order, symmetry) -> C
 
 Rewrite the boundary rows of the compact coefficient matrix `C` (size
 `(width, N)`, column `i` is row `i`'s stencil) so that active boundaries use a
@@ -95,7 +85,7 @@ This is a lightweight mirror stencil: it only rewrites the active sides' boundar
 rows in place, never building ghost-point objects or touching interior rows. It
 is not a full boundary-condition system and not pipe-specific regularity.
 """
-function apply_symmetry_stencil!(C, xs, width::Int, order::Int, symmetry::Tuple{Symmetry, Symmetry})
+function _apply_symmetry_stencil!(C, xs, width::Int, order::Int, symmetry::Tuple{Symmetry, Symmetry})
     symmetry == (NoSymmetry(), NoSymmetry()) && return C
 
     N      = length(xs)
@@ -130,7 +120,9 @@ function _mirror_row!(C, xs, width::Int, order::Int, i::Int, sym::Symmetry, c::R
     cols  = Vector{Int}(undef, width)
     signs = Vector{Float64}(undef, width)
 
-    gs = ghost_sign(sym)
+    # Sign applied to a reflected (ghost) node's weight: +1 even, -1 odd. `sym`
+    # is always active (never `NoSymmetry`) here, so the two cases are exhaustive.
+    gs = sym isa EvenSymmetry ? 1.0 : -1.0
     # `isapprox` avoids brittle exact float comparison when deciding whether the
     # centre sits on the boundary node (which skips duplicating that node).
     on_left  = isapprox(c, first(xs))

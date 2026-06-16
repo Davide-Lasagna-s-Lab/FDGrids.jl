@@ -22,6 +22,19 @@ full
 basis_vector
 ```
 
+## Boundary Symmetry
+
+```@docs
+Symmetry
+NoSymmetry
+EvenSymmetry
+OddSymmetry
+symmetry
+symmetry_left
+symmetry_right
+centre
+```
+
 ## Multiplication
 
 ```@docs
