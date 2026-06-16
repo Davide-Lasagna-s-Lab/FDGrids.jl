@@ -2,7 +2,7 @@ export AbstractGridDistribution,
        MappedGrid,
        UniformGrid,
        GaussLobattoGrid,
-       RadialChebyshevGrid,
+       HalfChebyshevGrid,
        grid
 
 # ================================================================================
@@ -21,7 +21,7 @@ always returning nodes and weights together so they are guaranteed to be consist
 | `MappedGrid(α, order)` | Mapped Chebyshev | yes | Composite Newton-Cotes | not guaranteed |
 | `UniformGrid()` | Equally spaced | yes | Composite trapezoidal | yes |
 | `GaussLobattoGrid()` | Chebyshev-Lobatto | yes | Clenshaw-Curtis | yes |
-| `RadialChebyshevGrid()` | Radial Chebyshev-Lobatto | see docstring | radial measure Clenshaw-Curtis | yes |
+| `HalfChebyshevGrid()` | Positive half Chebyshev-Lobatto | see docstring | radial measure Clenshaw-Curtis | yes |
 """
 abstract type AbstractGridDistribution end
 
@@ -99,25 +99,22 @@ struct GaussLobattoGrid <: AbstractGridDistribution end
 
 
 """
-    RadialChebyshevGrid()
+    HalfChebyshevGrid()
 
-Luhar-style radial Chebyshev grid on `[R0, R]`. For each radius, the grid uses
-the positive half of a `2M`-point Chebyshev-Lobatto grid on `[-A, A]`. An
-annulus is built by applying that construction to both `A = R0` and `A = R`,
-then using the difference between the two radial coordinate grids. The inner
-endpoint is omitted and the outer endpoint is included.
+Half Chebyshev grid on `[0, R]`. The grid uses the positive half of a
+`2M`-point Chebyshev-Lobatto grid on `[-R, R]`. The centreline is omitted and
+the outer endpoint is included.
 
 The returned weights include the cylindrical radial measure:
 
-    sum(f.(g.xs) .* g.ws) ≈ integral_R0^R f(r) r dr.
+    sum(f.(g.xs) .* g.ws) ≈ integral_0^R f(r) r dr.
 
 # Examples
 ```julia
-g = grid(64, 0, 1, RadialChebyshevGrid())      # solid disk/pipe
-g = grid(64, 0.2, 1, RadialChebyshevGrid())    # annulus
+g = grid(64, 1, HalfChebyshevGrid())
 ```
 """
-struct RadialChebyshevGrid <: AbstractGridDistribution end
+struct HalfChebyshevGrid <: AbstractGridDistribution end
 
 
 # ================================================================================
@@ -155,6 +152,16 @@ function grid(M::Int, l::Real = -1.0, h::Real = 1.0,
     M > 1 || throw(ArgumentError("M must be ≥ 2"))
     l < h  || throw(ArgumentError("l must be less than h"))
     return _grid(M, Float64(l), Float64(h), dist)
+end
+
+function grid(M::Int, R::Real, dist::HalfChebyshevGrid)
+    M > 1 || throw(ArgumentError("M must be ≥ 2"))
+    R > 0 || throw(ArgumentError("R must be positive"))
+    return _grid(M, Float64(R), dist)
+end
+
+function grid(M::Int, l::Real, h::Real, ::HalfChebyshevGrid)
+    throw(ArgumentError("HalfChebyshevGrid uses fixed left endpoint 0; call grid(M, R, HalfChebyshevGrid())"))
 end
 
 
@@ -218,25 +225,22 @@ function _grid(M::Int, l::Float64, h::Float64, ::GaussLobattoGrid)
     return (xs = xs, ws = ws)
 end
 
+# ---- HalfChebyshevGrid ----
 
-# ---- RadialChebyshevGrid ----
+"""
+    _grid(M, R, ::HalfChebyshevGrid) -> (xs, ws)
 
-function _grid(M::Int, l::Float64, h::Float64, ::RadialChebyshevGrid)
-    0 ≤ l < h || throw(ArgumentError("RadialChebyshevGrid requires 0 ≤ l < h"))
+Internal implementation for the half Chebyshev radial grid on `[0, R]`.
 
-    outer = _grid(2M, -h, h, GaussLobattoGrid())
-    r_outer = outer.xs[M+1:end]
-    dr_outer = outer.ws[M+1:end]
-
-    xs = r_outer
-    dr = dr_outer
-    if !iszero(l)
-        inner = _grid(2M, -l, l, GaussLobattoGrid())
-        r_inner = inner.xs[M+1:end]
-        dr_inner = inner.ws[M+1:end]
-        xs = l .+ r_outer .- r_inner
-        dr = dr_outer .- dr_inner
-    end
+The nodes are the positive half of a `2M`-point `GaussLobattoGrid()` on
+`[-R, R]`, so `0` is omitted and `R` is included. The returned weights include
+the radial measure: `ws = xs .* dr`, where `dr` are the corresponding
+Clenshaw-Curtis weights from the full symmetric grid.
+"""
+function _grid(M::Int, R::Float64, ::HalfChebyshevGrid)
+    r2 = grid(2M, -R, R, GaussLobattoGrid())
+    xs = r2.xs[M+1:end]
+    dr = r2.ws[M+1:end]
 
     ws = xs .* dr
     return (xs = xs, ws = ws)
