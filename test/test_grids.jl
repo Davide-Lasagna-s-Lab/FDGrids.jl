@@ -8,7 +8,7 @@
     I_radial_exp = (R - 1) * exp(R) - (R0 - 1) * exp(R0) # ∫_R0^R exp(r) r dr
 
     # ---- return type and named tuple fields ----
-    for dist in (MappedGrid(0.5), MappedGrid(0.5, 2), UniformGrid(), GaussLobattoGrid(), ChebyshevGrid())
+    for dist in (MappedGrid(0.5), MappedGrid(0.5, 2), UniformGrid(), GaussLobattoGrid())
         result = grid(M, l, h, dist)
         @test result isa NamedTuple
         @test haskey(result, :xs)
@@ -24,7 +24,7 @@
     @test length(result.ws) == M
 
     # ---- points are sorted ascending and within [l, h] ----
-    for dist in (MappedGrid(0.5), UniformGrid(), GaussLobattoGrid(), ChebyshevGrid())
+    for dist in (MappedGrid(0.5), UniformGrid(), GaussLobattoGrid())
         xs, _ = grid(M, l, h, dist)
         @test issorted(xs)
         @test xs[1]   ≈ l
@@ -36,7 +36,7 @@
     @test xs[end] ≈ R
 
     # ---- weights sum to interval length (∫_l^h 1 dx = h - l) ----
-    for dist in (MappedGrid(0.5), MappedGrid(0.5, 2), UniformGrid(), GaussLobattoGrid(), ChebyshevGrid())
+    for dist in (MappedGrid(0.5), MappedGrid(0.5, 2), UniformGrid(), GaussLobattoGrid())
         _, ws = grid(M, l, h, dist)
         @test sum(ws) ≈ h - l  atol=1e-12
     end
@@ -47,10 +47,8 @@
     _, ws = grid(M, l, h, UniformGrid())
     @test all(ws .> 0)
 
-    # ---- GaussLobattoGrid and ChebyshevGrid: weights always strictly positive ----
+    # ---- GaussLobattoGrid: weights always strictly positive ----
     _, ws = grid(M, l, h, GaussLobattoGrid())
-    @test all(ws .> 0)
-    _, ws = grid(M, l, h, ChebyshevGrid())
     @test all(ws .> 0)
     _, ws = grid(M, R0, R, RadialChebyshevGrid())
     @test all(ws .> 0)
@@ -70,22 +68,16 @@
     expected = [cos(π * (M - 1 - j) / (M - 1)) for j in 0:M-1]
     @test xs ≈ expected  atol=1e-14
 
-    # ---- ChebyshevGrid: Chebyshev-Lobatto nodes from sin formula ----
-    xs, _ = grid(M, l, h, ChebyshevGrid())
-    expected = [(l + h) / 2 + (h - l) / 2 * sin(π * (2j - M + 1) / (2 * (M - 1)))
-                for j in 0:M-1]
-    @test xs ≈ expected atol=1e-14
-
     # ---- RadialChebyshevGrid: half-Chebyshev radial coordinates and weights ----
     g = grid(M, 0.0, R, RadialChebyshevGrid())
-    outer = grid(2M, -R, R, ChebyshevGrid())
+    outer = grid(2M, -R, R, GaussLobattoGrid())
     r_outer = outer.xs[M+1:end]
     dr_outer = outer.ws[M+1:end]
     @test g.xs ≈ r_outer
     @test g.ws ≈ r_outer .* dr_outer
 
     annulus = grid(M, R0, R, RadialChebyshevGrid())
-    inner = grid(2M, -R0, R0, ChebyshevGrid())
+    inner = grid(2M, -R0, R0, GaussLobattoGrid())
     r_inner = inner.xs[M+1:end]
     dr_inner = inner.ws[M+1:end]
     expected_xs = R0 .+ r_outer .- r_inner
@@ -121,9 +113,6 @@
     xs_gl, ws_gl = grid(8, -1.0, 1.0, GaussLobattoGrid())
     f5(x) = x^5 - 3x^3 + x    # exact integral on [-1,1] = 0
     @test abs(sum(f5.(xs_gl) .* ws_gl)) < 1e-14
-
-    xs_ch, ws_ch = grid(8, -1.0, 1.0, ChebyshevGrid())
-    @test abs(sum(f5.(xs_ch) .* ws_ch)) < 1e-14
 
     # ---- error handling ----
     @test_throws ArgumentError grid(1, l, h, GaussLobattoGrid())   # M < 2
