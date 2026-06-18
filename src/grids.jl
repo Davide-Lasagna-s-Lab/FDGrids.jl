@@ -2,6 +2,7 @@ export AbstractGridDistribution,
        MappedGrid,
        UniformGrid,
        GaussLobattoGrid,
+       HalfChebyshevGrid,
        grid
 
 # ================================================================================
@@ -20,6 +21,7 @@ always returning nodes and weights together so they are guaranteed to be consist
 | `MappedGrid(α, order)` | Mapped Chebyshev | yes | Composite Newton-Cotes | not guaranteed |
 | `UniformGrid()` | Equally spaced | yes | Composite trapezoidal | yes |
 | `GaussLobattoGrid()` | Chebyshev-Lobatto | yes | Clenshaw-Curtis | yes |
+| `HalfChebyshevGrid()` | Positive half Chebyshev-Lobatto | see docstring | radial measure Clenshaw-Curtis | yes |
 """
 abstract type AbstractGridDistribution end
 
@@ -96,6 +98,25 @@ D = DiffMatrix(g.xs, 5, 1)
 struct GaussLobattoGrid <: AbstractGridDistribution end
 
 
+"""
+    HalfChebyshevGrid()
+
+Half Chebyshev grid on `[0, R]`. The grid uses the positive half of a
+`2M`-point Chebyshev-Lobatto grid on `[-R, R]`. The centreline is omitted and
+the outer endpoint is included.
+
+The returned weights include the cylindrical radial measure:
+
+    sum(f.(g.xs) .* g.ws) ≈ integral_0^R f(r) r dr.
+
+# Examples
+```julia
+g = grid(64, 1, HalfChebyshevGrid())
+```
+"""
+struct HalfChebyshevGrid <: AbstractGridDistribution end
+
+
 # ================================================================================
 # Main API: grid(M, l, h, dist) -> (xs, ws)
 # ================================================================================
@@ -131,6 +152,16 @@ function grid(M::Int, l::Real = -1.0, h::Real = 1.0,
     M > 1 || throw(ArgumentError("M must be ≥ 2"))
     l < h  || throw(ArgumentError("l must be less than h"))
     return _grid(M, Float64(l), Float64(h), dist)
+end
+
+function grid(M::Int, R::Real, dist::HalfChebyshevGrid)
+    M > 1 || throw(ArgumentError("M must be ≥ 2"))
+    R > 0 || throw(ArgumentError("R must be positive"))
+    return _grid(M, Float64(R), dist)
+end
+
+function grid(M::Int, l::Real, h::Real, ::HalfChebyshevGrid)
+    throw(ArgumentError("HalfChebyshevGrid uses fixed left endpoint 0; call grid(M, R, HalfChebyshevGrid())"))
 end
 
 
@@ -191,6 +222,27 @@ function _grid(M::Int, l::Float64, h::Float64, ::GaussLobattoGrid)
     xs = [(l + h) / 2 + (h - l) / 2 * cos(π * (M - 1 - j) / (M - 1))
           for j in 0:M-1]
     ws = _clenshaw_curtis_weights(M, l, h)
+    return (xs = xs, ws = ws)
+end
+
+# ---- HalfChebyshevGrid ----
+
+"""
+    _grid(M, R, ::HalfChebyshevGrid) -> (xs, ws)
+
+Internal implementation for the half Chebyshev radial grid on `[0, R]`.
+
+The nodes are the positive half of a `2M`-point `GaussLobattoGrid()` on
+`[-R, R]`, so `0` is omitted and `R` is included. The returned weights include
+the radial measure: `ws = xs .* dr`, where `dr` are the corresponding
+Clenshaw-Curtis weights from the full symmetric grid.
+"""
+function _grid(M::Int, R::Float64, ::HalfChebyshevGrid)
+    r2 = grid(2M, -R, R, GaussLobattoGrid())
+    xs = r2.xs[M+1:end]
+    dr = r2.ws[M+1:end]
+
+    ws = xs .* dr
     return (xs = xs, ws = ws)
 end
 

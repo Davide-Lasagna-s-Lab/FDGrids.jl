@@ -1,4 +1,4 @@
-@testset "test grid API                             " begin
+@testset "test grid API                                  " begin
     M = 64
     l = -1.0
     h =  2.0
@@ -80,9 +80,33 @@
     f5(x) = x^5 - 3x^3 + x    # exact integral on [-1,1] = 0
     @test abs(sum(f5.(xs_gl) .* ws_gl)) < 1e-14
 
+    # ---- HalfChebyshevGrid ----
+    # The weights already include the radial measure r dr, so using f(r)=r cos(r)
+    # gives an even integrand r^2 cos(r) for the underlying symmetric rule.
+    R = 2.0
+    I_radial_rcosr = R^2 * sin(R) + 2R * cos(R) - 2sin(R) # ∫_0^R r^2 cos(r) dr
+    g = grid(M, R, HalfChebyshevGrid())
+    @test g isa NamedTuple
+    @test haskey(g, :xs)
+    @test haskey(g, :ws)
+    @test length(g.xs) == M
+    @test length(g.ws) == M
+    @test issorted(g.xs)
+    @test 0.0 < g.xs[1]
+    @test g.xs[end] ≈ R
+    @test all(g.ws .> 0)
+    @test sum(g.xs .* cos.(g.xs) .* g.ws) ≈ I_radial_rcosr atol=1e-12
+
+    r2 = grid(2M, -R, R, GaussLobattoGrid())
+    @test g.xs ≈ r2.xs[M+1:end]
+    @test g.ws ≈ r2.xs[M+1:end] .* r2.ws[M+1:end]
+
     # ---- error handling ----
     @test_throws ArgumentError grid(1, l, h, GaussLobattoGrid())   # M < 2
     @test_throws ArgumentError grid(M, h, l, GaussLobattoGrid())   # l > h
+    @test_throws ArgumentError grid(1, R, HalfChebyshevGrid())      # M < 2
+    @test_throws ArgumentError grid(M, 0.0, R, HalfChebyshevGrid()) # four-argument API not supported
+    @test_throws ArgumentError grid(M, -R, HalfChebyshevGrid())     # R < 0
     @test_throws ArgumentError MappedGrid(0.0)                     # α = 0
     @test_throws ArgumentError MappedGrid(1.5)                     # α > 1
     @test_throws ArgumentError MappedGrid(0.5, 0)                  # order < 1

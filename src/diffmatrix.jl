@@ -275,10 +275,14 @@ _unsupported_diffmatrix_broadcast(op, operand) =
 
 # Evaluate one lazy broadcast tree at one logical dense matrix index. This is
 # used only for entries that have storage in the destination stencil.
+@inline _bc_args(::Tuple{}, I) = ()
+@inline _bc_args(args::Tuple{Any}, I) = (_bc_arg(args[1], I),)
+@inline _bc_args(args::Tuple, I) = (_bc_arg(args[1], I), _bc_args(Base.tail(args), I)...)
+
 @inline _bc_arg(x, I) = Base.Broadcast._broadcast_getindex(x, I)
-@inline _bc_arg(J::LinearAlgebra.UniformScaling, I) = J[I]
-@inline _bc_arg(bc::Base.Broadcast.Broadcasted, I) = bc.f(map(x -> _bc_arg(x, I), bc.args)...)
-@inline _bc_style(d::DiffMatrix{T, WIDTH, OPTIMISE}) where {T, WIDTH, OPTIMISE} =
+@inline _bc_arg(J::LinearAlgebra.UniformScaling, I) = J[Tuple(I)...]
+@inline _bc_arg(bc::Base.Broadcast.Broadcasted, I) = bc.f(_bc_args(bc.args, I)...)
+@inline _bc_style(::DiffMatrix{T, WIDTH, OPTIMISE}) where {T, WIDTH, OPTIMISE} =
     DiffMatrixStyle{T, WIDTH, OPTIMISE}()
 @inline _bc_style(::Base.Broadcast.Broadcasted{Style}) where {Style <: DiffMatrixStyle} = Style()
 

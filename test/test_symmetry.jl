@@ -2,7 +2,7 @@
 # operator against an ordinary DiffMatrix built on an explicitly mirrored grid.
 # `cos(πx)` is even and `sin(πx)` is odd about both centres used here, 0 and 1.
 
-@testset "left boundary symmetry output, centre on node" begin
+@testset "left boundary symmetry output, centre on node  " begin
     xs = collect(range(0.0, 1.0; length = 21))
     centre = 0.0
     width = 3
@@ -28,7 +28,7 @@
     @test du_odd[1:H] ≈ du_odd_ext[H+1:2H] atol = 1e-12
 end
 
-@testset "left boundary symmetry output, centre off node" begin
+@testset "left boundary symmetry output, centre off node " begin
     xs = collect(range(0.1, 1.0; length = 21))
     centre = 0.0
     width = 3
@@ -54,7 +54,7 @@ end
     @test du_odd[1:H] ≈ du_odd_ext[H+1:2H] atol = 1e-12
 end
 
-@testset "right boundary symmetry output, centre on node" begin
+@testset "right boundary symmetry output, centre on node " begin
     xs = collect(range(0.0, 1.0; length = 21))
     centre = last(xs)
     width = 3

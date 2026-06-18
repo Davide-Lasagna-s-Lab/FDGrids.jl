@@ -11,6 +11,7 @@ AbstractGridDistribution
 MappedGrid
 UniformGrid
 GaussLobattoGrid
+HalfChebyshevGrid
 grid
 ```
 

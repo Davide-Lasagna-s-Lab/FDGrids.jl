@@ -1,4 +1,4 @@
-@testset "test indexing                             " begin
+@testset "test indexing                                  " begin
     for M = 3:10
         for width = 3:2:9
             if M > width
@@ -18,7 +18,7 @@
     end
 end
 
-@testset "slicing                                   " begin
+@testset "slicing                                        " begin
     # points
     xs, _ = grid(10, -1, 1, MappedGrid(1))
 
@@ -36,7 +36,7 @@ end
     @test all(D[end, :] .== [0, 0, 0, 0, 0, 0, 0, 2, 3, 4])
 end
 
-@testset "algebra                                   " begin
+@testset "algebra                                        " begin
     xs, _ = grid(6, -1, 1, MappedGrid(1))
 
     # diffmatrix
@@ -60,14 +60,14 @@ end
     @test typeof(D + D) <: DiffMatrix{Float64, 3, true}
 end
 
-_uniformscaling_broadcast_dotted!(A, D, θ₀, θ₁) = (A .= θ₀ .* D .- θ₁ .* I; A)
-_uniformscaling_broadcast_scaled!(A, D, θ₀, θ₁) = (A .= θ₀ .* D .- θ₁ * I; A)
-_uniformscaling_mask_right!(A, D, θ) = (A .= D .* (θ .* I); A)
-_uniformscaling_mask_left!(A, D, θ) = (A .= (θ .* I) .* D; A)
-_diagonal_broadcast!(A, D, C, θ) = (A .= θ .* D .+ C; A)
-_diffmatrix_pair_broadcast!(A, DA, DB) = (A .= 2 .* DA .- 3 .* DB; A)
+_uniformscaling_broadcast_dotted!(A, D, θ₀, θ₁) = @allocated(A .= θ₀ .* D .- θ₁ .* I)
+_uniformscaling_broadcast_scaled!(A, D, θ₀, θ₁) = @allocated(A .= θ₀ .* D .- θ₁ * I)
+_uniformscaling_mask_right!(A, D, θ) = @allocated(A .= D .* (θ .* I))
+_uniformscaling_mask_left!(A, D, θ) = @allocated(A .= (θ .* I) .* D)
+_diagonal_broadcast!(A, D, C, θ) = @allocated(A .= θ .* D .+ C)
+_diffmatrix_pair_broadcast!(A, DA, DB) = @allocated(A .= 2 .* DA .- 3 .* DB)
 
-@testset "compact structured broadcast              " begin
+@testset "compact structured broadcast                   " begin
     for M in (10, 32), width in (3, 5, 7)
         xs, _ = grid(M, -1, 1, MappedGrid(1))
         D  = DiffMatrix(xs, width, 2)
@@ -108,34 +108,34 @@ _diffmatrix_pair_broadcast!(A, DA, DB) = (A .= 2 .* DA .- 3 .* DB; A)
         A1 = similar(D)
         _uniformscaling_broadcast_dotted!(A1, D, θ₀, θ₁)
         @test FDGrids.full(A1) ≈ FDGrids.full(A_ref)
-        @test (@allocated _uniformscaling_broadcast_dotted!(A1, D, θ₀, θ₁)) == 0
+        @test _uniformscaling_broadcast_dotted!(A1, D, θ₀, θ₁) == 0
 
         # broadcast with UniformScaling via * I (scalar-times-I form)
         A2 = similar(D)
         _uniformscaling_broadcast_scaled!(A2, D, θ₀, θ₁)
         @test FDGrids.full(A2) ≈ FDGrids.full(A_ref)
-        @test (@allocated _uniformscaling_broadcast_scaled!(A2, D, θ₀, θ₁)) == 0
+        @test _uniformscaling_broadcast_scaled!(A2, D, θ₀, θ₁) == 0
 
         # elementwise multiplication by I keeps only the diagonal
         A3 = similar(D)
         _uniformscaling_mask_right!(A3, D, θ₁)
         @test FDGrids.full(A3) ≈ Dfull .* Jfull
-        @test (@allocated _uniformscaling_mask_right!(A3, D, θ₁)) == 0
+        @test _uniformscaling_mask_right!(A3, D, θ₁) == 0
 
         A4 = similar(D)
         _uniformscaling_mask_left!(A4, D, θ₁)
         @test FDGrids.full(A4) ≈ Jfull .* Dfull
-        @test (@allocated _uniformscaling_mask_left!(A4, D, θ₁)) == 0
+        @test _uniformscaling_mask_left!(A4, D, θ₁) == 0
 
         A5 = similar(D)
         _diagonal_broadcast!(A5, D, C, θ₀)
         @test FDGrids.full(A5) ≈ θ₀ .* Dfull .+ C
-        @test (@allocated _diagonal_broadcast!(A5, D, C, θ₀)) == 0
+        @test _diagonal_broadcast!(A5, D, C, θ₀) == 0
 
         A6 = similar(DA .+ DB)
         _diffmatrix_pair_broadcast!(A6, DA, DB)
         @test FDGrids.full(A6) ≈ 2 .* FDGrids.full(DA) .- 3 .* FDGrids.full(DB)
-        @test (@allocated _diffmatrix_pair_broadcast!(A6, DA, DB)) == 0
+        @test _diffmatrix_pair_broadcast!(A6, DA, DB) == 0
 
         # result type is preserved
         @test A1 isa DiffMatrix
@@ -156,7 +156,7 @@ _diffmatrix_pair_broadcast!(A, DA, DB) = (A .= 2 .* DA .- 3 .* DB; A)
     @test_throws DimensionMismatch D .+ Diagonal(rand(9))
 end
 
-@testset "test full.                                " begin
+@testset "test full.                                     " begin
     M = 32
     width = 3
 
