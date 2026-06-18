@@ -1,4 +1,4 @@
-@testset "test lufact                               " begin
+@testset "test lufact                                    " begin
     xs, _ = grid(12, -1, 1, MappedGrid(1))
 
     for width in (3, 5, 7)
@@ -21,7 +21,7 @@
     end
 end
 
-@testset "test generic banded lu                    " begin
+@testset "test generic banded lu                         " begin
     for M in (10, 100)
         xs, _ = grid(M, -1, 1, MappedGrid(1))
         for width in (3, 5, 7, 9)
@@ -45,7 +45,7 @@ end
     end
 end
 
-@testset "test DiffMatrix lu                        " begin
+@testset "test DiffMatrix lu                             " begin
     for M in (10, 100)
         xs, _ = grid(M, -1, 1, MappedGrid(1))
         for width in (3, 5, 7, 9)
@@ -75,7 +75,7 @@ end
     end
 end
 
-@testset "test new lufact                           " begin
+@testset "test new lufact                                " begin
     for M in (10, 100)
         xs, _ = grid(M, -1, 1, MappedGrid(1))
         for width in (3, 5, 7, 9)
@@ -107,7 +107,7 @@ end
     end
 end
 
-@testset "test demo linsolve                        " begin
+@testset "test demo linsolve                             " begin
     for M in (100, 300)
         xs, _ = grid(M, -1, 1, MappedGrid(1))
         for width in (3, 5, 7, 9, 11, 13)
@@ -132,7 +132,7 @@ end
     end
 end
 
-@testset "boundary value problem example            " begin
+@testset "boundary value problem example                 " begin
     M = 64
     g = grid(M, -1, 1, GaussLobattoGrid())
 
@@ -151,7 +151,7 @@ end
     @test u[end] ≈ 0 atol=1e-14
 end
 
-@testset "test BVP                                  " begin
+@testset "test BVP                                       " begin
     # solve u'' + u' = 1, with u(-1) = 2, u(1) = 0
 
     # test different orders

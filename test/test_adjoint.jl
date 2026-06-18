@@ -3,7 +3,7 @@
 # Included from runtests.jl after `using FDGrids`.
 # ================================================================================
 
-@testset "test AdjointDiffMatrix type               " begin
+@testset "test AdjointDiffMatrix type                    " begin
     M     = 32
     width = 5
     xs, _ = grid(M, -1, 1, MappedGrid(0.5))
@@ -35,7 +35,7 @@
     @test full(At) ≈ transpose(Df)
 end
 
-@testset "test adjoint corner cases                 " begin
+@testset "test adjoint corner cases                      " begin
     for width in (3, 5, 7)
         # exactly 2*WIDTH points — no body, should throw
         xs_bad, _ = grid(2 * width, -1, 1, MappedGrid(0.5))
@@ -54,7 +54,7 @@ end
     end
 end
 
-@testset "test adjoint identity                     " begin
+@testset "test adjoint identity                          " begin
     # verify (v, D w) = (D* v, w) for various orders, widths, and grids
     M = 1024
     for ORDER in (1, 2), WIDTH in (3, 5, 7),
@@ -68,7 +68,7 @@ end
     end
 end
 
-@testset "test transpose N-D                        " begin
+@testset "test transpose N-D                             " begin
     # verify mul!(y, adjoint(D), x, Val(DIM)) against Df' applied slice-by-slice
     M     = 32
     OTHER = 3
@@ -99,7 +99,7 @@ end
     end
 end
 
-@testset "test weighted adjoint                     " begin
+@testset "test weighted adjoint                          " begin
     # verify weighted_adjoint(D, w) agrees with W⁻¹ D* W applied explicitly
     for M in (32, 64), width in (3, 5, 7)
         M > 2 * width || continue

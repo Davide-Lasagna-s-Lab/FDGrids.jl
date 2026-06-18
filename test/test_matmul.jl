@@ -1,4 +1,4 @@
-@testset "matvec/matmat product                     " begin
+@testset "matvec/matmat product                          " begin
     for width = (3, 5, 7)
         D = DiffMatrix(grid(50, -1, 1, MappedGrid(0.5))[1], width, 1)
         Df = FDGrids.full(D)
@@ -11,7 +11,7 @@
     end
 end
 
-@testset "mul! accumulation mode                    " begin
+@testset "mul! accumulation mode                         " begin
     xs, _ = grid(12, -1, 1, MappedGrid(0.5))
     D = DiffMatrix(xs, 5, 1)
     Dt = adjoint(D)
@@ -34,7 +34,7 @@ end
     end
 end
 
-@testset "test diffmatrix at point                  " begin
+@testset "test diffmatrix at point                       " begin
     # number of points
     for M in (10, 20, 30)
         for width in (3, 5, 7)
@@ -54,7 +54,7 @@ end
     end
 end
 
-@testset "test diffmatrix 1st/2nd order - vec       " begin
+@testset "test diffmatrix 1st/2nd order - vec            " begin
     # the order of accuracy is the width minus one
     for (width, v1_max, v2_center_max, v2_bndr_max) in zip((3,    5,     7),
                                                            (1.21, 3.22,  9.85),
@@ -102,7 +102,7 @@ end
     end
 end
 
-@testset "test diffmatrix 1st/2nd order - mat       " begin
+@testset "test diffmatrix 1st/2nd order - mat            " begin
     # the order of accuracy is the width minus one
     for (width, v1_max, v2_center_max, v2_bndr_max) in zip((3,    5,     7),
                                                            (1.21, 3.22,  9.85),
@@ -173,7 +173,7 @@ end
     end
 end
 
-@testset "test diffmatrix 1st/2nd order - cube      " begin
+@testset "test diffmatrix 1st/2nd order - cube           " begin
     # the order of accuracy is the width minus one
     for (width, v1_max, v2_center_max, v2_bndr_max) in zip((3,    5,     7),
                                                            (1.21, 3.22,  9.85),
@@ -255,7 +255,7 @@ end
     end
 end
 
-@testset "test diffmatrix 1st/2nd order - hypercube " begin
+@testset "test diffmatrix 1st/2nd order - hypercube      " begin
     # the order of accuracy is the width minus one
     for (width, v1_max, v2_center_max, v2_bndr_max) in zip((3,    5,     7),
                                                            (1.21, 3.22,  9.85),

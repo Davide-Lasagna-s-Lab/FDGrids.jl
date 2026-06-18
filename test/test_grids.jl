@@ -1,4 +1,4 @@
-@testset "test grid API                             " begin
+@testset "test grid API                                  " begin
     M = 64
     l = -1.0
     h =  2.0

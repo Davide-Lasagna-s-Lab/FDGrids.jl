@@ -38,7 +38,7 @@ end
 # ================================================================================
 # Adapt and cu type tests
 # ================================================================================
-@testset "FDGridsCUDAExt: adaptation                " begin
+@testset "FDGridsCUDAExt: adaptation                     " begin
     M = 64
     @testset "DiffMatrix width=$width" for width in (3, 5, 7)
         xs = collect(range(-1.0, 1.0; length = M))
@@ -98,7 +98,7 @@ end
 # ================================================================================
 # Forward mul!
 # ================================================================================
-@testset "FDGridsCUDAExt: forward 1D                " begin
+@testset "FDGridsCUDAExt: forward 1D                     " begin
     M = 128
 
     @testset "T=$T width=$width" for T in (Float32, Float64), width in (3, 5, 7)
@@ -120,7 +120,7 @@ end
     end
 end
 
-@testset "FDGridsCUDAExt: forward N-D               " begin
+@testset "FDGridsCUDAExt: forward N-D                    " begin
     M     = 32
     OTHER = 3
 
@@ -152,7 +152,7 @@ end
 # ================================================================================
 # Adjoint mul!
 # ================================================================================
-@testset "FDGridsCUDAExt: adjoint 1D                " begin
+@testset "FDGridsCUDAExt: adjoint 1D                     " begin
     M = 128
 
     @testset "T=$T width=$width" for T in (Float32, Float64), width in (3, 5, 7)
@@ -175,7 +175,7 @@ end
     end
 end
 
-@testset "FDGridsCUDAExt: adjoint N-D               " begin
+@testset "FDGridsCUDAExt: adjoint N-D                    " begin
     M     = 32
     OTHER = 3
 
@@ -215,7 +215,7 @@ end
 # test exercises the same code path against the heavier CPU reference path
 # `W⁻¹ * full(D)' * W`.
 
-@testset "FDGridsCUDAExt: weighted adjoint          " begin
+@testset "FDGridsCUDAExt: weighted adjoint               " begin
     M = 128
 
     @testset "T=$T width=$width" for T in (Float32, Float64), width in (3, 5, 7)
@@ -243,7 +243,7 @@ end
 # ================================================================================
 # Argument validation
 # ================================================================================
-@testset "FDGridsCUDAExt: argument validation       " begin
+@testset "FDGridsCUDAExt: argument validation            " begin
     M  = 32
     xs = collect(range(-1.0, 1.0; length = M))
     D  = DiffMatrix(xs, 5, 1)
@@ -278,7 +278,7 @@ end
 # ================================================================================
 # nthreads override is honoured
 # ================================================================================
-@testset "FDGridsCUDAExt: nthreads override         " begin
+@testset "FDGridsCUDAExt: nthreads override              " begin
     M  = 256
     xs = collect(range(-1.0, 1.0; length = M))
     D  = DiffMatrix(xs, 5, 1)
