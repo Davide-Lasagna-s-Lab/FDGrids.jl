@@ -39,21 +39,22 @@ loops. Broadcasts that would fill structural zeros, such as `D .+ 1` or `D .+
 rand(size(D)...)`, are not compact operations; use `full(D)` first when a dense
 result is intended.
 """
-struct DiffMatrix{T, WIDTH, OPTIMISE, V<:AbstractVector{T}} <: AbstractMatrix{T}
+struct DiffMatrix{T, WIDTH, OPTIMISE, V<:AbstractVector{T}, S1<:Symmetry, S2<:Symmetry} <: AbstractMatrix{T}
+    # ! make sure everything is concretely typed, otherwise it affects GPU code
     coeffs::V
     # `(left, right)` boundary symmetry; see `src/symmetry.jl`. This is a runtime
     # field (not a type parameter) and the main switch: a `NoSymmetry()` side
     # leaves its coefficients unchanged, while `EvenSymmetry(c)`/`OddSymmetry(c)`
     # rewrites that side's boundary rows mirrored about the centre `c`. Interior
     # rows are never changed.
-    symmetry::Tuple{Symmetry, Symmetry}
+    symmetry::Tuple{S1, S2}
 
     # Bypass constructor useful for CUDA adaptation (see ext/FDGridsCUDAExt.jl).
     DiffMatrix{T, WIDTH, OPTIMISE}(
         coeffs::V,
-        symmetry::Tuple{Symmetry, Symmetry} = (NoSymmetry(), NoSymmetry()),
-    ) where {T, WIDTH, OPTIMISE, V<:AbstractVector{T}} =
-        new{T, WIDTH, OPTIMISE, V}(coeffs, symmetry)
+        symmetry::Tuple{S1, S2} = (NoSymmetry(), NoSymmetry()),
+    ) where {T, WIDTH, OPTIMISE, V<:AbstractVector{T}, S1, S2} =
+        new{T, WIDTH, OPTIMISE, V, S1, S2}(coeffs, symmetry)
 end
 
 """
