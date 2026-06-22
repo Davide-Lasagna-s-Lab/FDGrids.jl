@@ -41,7 +41,7 @@ end
 @testset "FDGridsCUDAExt: adaptation                     " begin
     M = 64
     @testset "DiffMatrix width=$width" for width in (3, 5, 7)
-        xs = collect(range(-1.0, 1.0; length = M))
+        xs = collect(range(-1.0, 1.0; length=M))
         D  = DiffMatrix(xs, width, 1)
 
         # cu downcasts to Float32 and produces CuArray storage
@@ -60,7 +60,7 @@ end
     end
 
     @testset "AdjointDiffMatrix width=$width" for width in (3, 5, 7)
-        xs  = collect(range(-1.0, 1.0; length = M))
+        xs  = collect(range(-1.0, 1.0; length=M))
         D   = DiffMatrix(xs, width, 1)
         At  = adjoint(D)
 
@@ -83,7 +83,7 @@ end
     end
 
     @testset "weighted AdjointDiffMatrix width=$width" for width in (3, 5, 7)
-        xs = collect(range(-1.0, 1.0; length = M))
+        xs = collect(range(-1.0, 1.0; length=M))
         D  = DiffMatrix(xs, width, 1)
         w  = 1.0 .+ rand(M)
         Aw = adjoint(D, w)
@@ -104,7 +104,7 @@ end
     @testset "T=$T width=$width" for T in (Float32, Float64), width in (3, 5, 7)
         rtol = T === Float32 ? _GPU_RTOL_F32 : _GPU_RTOL_F64
 
-        xs = collect(range(-1.0, 1.0; length = M))
+        xs = collect(range(-1.0, 1.0; length=M))
         D  = DiffMatrix(xs, width, 1)
         Dg = _gpu_op(D, T)
 
@@ -131,7 +131,7 @@ end
             width in (3, 5, 7)
 
         rtol  = T === Float32 ? _GPU_RTOL_F32 : _GPU_RTOL_F64
-        xs    = collect(range(-1.0, 1.0; length = M))
+        xs    = collect(range(-1.0, 1.0; length=M))
         D     = DiffMatrix(xs, width, 1)
         Dg    = _gpu_op(D, T)
         shape = ntuple(d -> d == DIM ? M : OTHER, N)
@@ -158,7 +158,7 @@ end
     @testset "T=$T width=$width" for T in (Float32, Float64), width in (3, 5, 7)
         rtol = T === Float32 ? _GPU_RTOL_F32 : _GPU_RTOL_F64
 
-        xs = collect(range(-1.0, 1.0; length = M))
+        xs = collect(range(-1.0, 1.0; length=M))
         D  = DiffMatrix(xs, width, 1)
         At = adjoint(D)
         Ag = _gpu_op(At, T)
@@ -188,7 +188,7 @@ end
         # adjoint requires M > 2*WIDTH for a non-empty body
         M > 2 * width || continue
         rtol  = T === Float32 ? _GPU_RTOL_F32 : _GPU_RTOL_F64
-        xs    = collect(range(-1.0, 1.0; length = M))
+        xs    = collect(range(-1.0, 1.0; length=M))
         D     = DiffMatrix(xs, width, 1)
         At    = adjoint(D)
         Ag    = _gpu_op(At, T)
@@ -221,7 +221,7 @@ end
     @testset "T=$T width=$width" for T in (Float32, Float64), width in (3, 5, 7)
         rtol = T === Float32 ? _GPU_RTOL_F32 : _GPU_RTOL_F64
 
-        xs = collect(range(-1.0, 1.0; length = M))
+        xs = collect(range(-1.0, 1.0; length=M))
         D  = DiffMatrix(xs, width, 1)
         w  = 1.0 .+ rand(M)
         Aw = adjoint(D, w)
@@ -245,7 +245,7 @@ end
 # ================================================================================
 @testset "FDGridsCUDAExt: argument validation            " begin
     M  = 32
-    xs = collect(range(-1.0, 1.0; length = M))
+    xs = collect(range(-1.0, 1.0; length=M))
     D  = DiffMatrix(xs, 5, 1)
     Dg = cu(D)
 
@@ -280,7 +280,7 @@ end
 # ================================================================================
 @testset "FDGridsCUDAExt: nthreads override              " begin
     M  = 256
-    xs = collect(range(-1.0, 1.0; length = M))
+    xs = collect(range(-1.0, 1.0; length=M))
     D  = DiffMatrix(xs, 5, 1)
     Dg = cu(D)
     At = adjoint(D)
@@ -288,20 +288,17 @@ end
 
     u  = sin.(xs)
     ug = CuArray(Float32.(u))
-
     yg_auto = similar(ug)
     yg_pin  = similar(ug)
-    nthreads_forward = FDGrids.optimal_forward_threads(yg_pin, Dg, ug, Val(1))
-    nthreads_adjoint = FDGrids.optimal_adjoint_threads(yg_pin, Ag, ug, Val(1))
 
     # The result must not depend on the per-block thread count, so a small
     # custom block size should still produce the same field as the auto-tuned
     # default. 32 ensures at least one warp per block.
     mul!(yg_auto, Dg, ug)
-    mul!(yg_pin,  Dg, ug; nthreads=nthreads_forward)
+    mul!(yg_pin,  Dg, ug; nthreads=64)
     @test Array(yg_auto) ≈ Array(yg_pin)
 
     mul!(yg_auto, Ag, ug)
-    mul!(yg_pin,  Ag, ug; nthreads=nthreads_adjoint)
+    mul!(yg_pin,  Ag, ug; nthreads=64)
     @test Array(yg_auto) ≈ Array(yg_pin)
 end

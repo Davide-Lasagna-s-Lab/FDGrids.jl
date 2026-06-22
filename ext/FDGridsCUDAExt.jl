@@ -151,6 +151,40 @@ end
 
 
 # ================================================================================
+# Launch configuration settings
+# ================================================================================
+const LAUNCH_PARAMS = Dict{Tuple{Type, NTuple}, Int32}()
+
+"""
+    _get_launch_params(kernel_f, kernel_args...) -> Int32
+
+Get the tuned threads, obtained via @cuda launch configuration, for
+the specific GPU kernel function `kernel_f` and kernel arguments
+`kernel_args`.
+
+If a configuration has already been performed for
+the kernel and arguments provided then the result is just fetched
+from the `LAUNCH_PARAMS` variable.
+"""
+function _get_launch_params(kernel_f::F, kernel_args...) where {F}
+    key = (F, map(typeof, kernel_args))
+    get!(LAUNCH_PARAMS, key) do
+        kernel = @cuda launch=false kernel_f(kernel_args...)
+        Int32(CUDA.launch_configuration(kernel.fun).threads)
+    end
+end
+
+"""
+    reset_launch_params!()
+
+Clear the `LAUNCH_PARAMS` variable. Useful when benchmarking different
+methods explicitly, or after moving to a different GPU with different
+performance characteristics.
+"""
+FDGrids.reset_launch_params!() = empty!(LAUNCH_PARAMS)
+
+
+# ================================================================================
 # GPU kernel helpers
 # ================================================================================
 #
@@ -434,69 +468,6 @@ descriptive message if either condition is violated.
     return nothing
 end
 
-"""
-    _launch_config(kernel, total, nthreads) -> (threads, blocks)
-
-Decide how many threads-per-block and how many blocks to use for a kernel.
-
-When `nthreads` is `nothing`, the per-block thread count is taken from
-`launch_configuration` (occupancy heuristic) and capped at `total` for very
-small launches. When `nthreads` is supplied, the caller's choice is honored
-verbatim — useful for benchmarks pinning a block size.
-
-`blocks` is computed by ceiling division of `total` by the chosen thread
-count, so the launch covers all `total` outputs while leaving a possibly
-under-filled final block.
-"""
-@inline function _launch_config(kernel, total::Int, nthreads)
-    config  = launch_configuration(kernel.fun)
-    threads = isnothing(nthreads) ? min(config.threads, total) : nthreads
-    blocks  = cld(total, threads)
-    return threads, blocks
-end
-
-"""
-    optimal_forward_threads(y, A::DiffMatrix, x, ::Val{DIM}; max_threads=nothing)
-
-Determine the optimal number of threads required to run the
-[`_gpu_forward_kernel`](@ref).
-
-Run this function and store the results for later use when calling [`mul!`](@ref)
-with GPU data.
-"""
-function FDGrids.optimal_forward_threads(y::AbstractArray,
-                                         A::DiffMatrix{T, WIDTH},
-                                         x::AbstractArray,
-                                          ::Val{DIM};
-                               max_threads=nothing) where {T, WIDTH, DIM}
-    k = @cuda launch=false _gpu_forward_kernel!(
-        y, A.coeffs, x, Int32.(size(x)), Val(Int32(DIM)), Val(Int32(WIDTH))
-    )
-    threads = launch_configuration(k.fun).threads
-    return isnothing(max_threads) ? threads : min(threads, max_threads)
-end
-
-"""
-    optimal_adjoint_threads(y, A::DiffMatrix, x, ::Val{DIM}; max_threads=nothing)
-
-Determine the optimal number of threads required to run the
-[`_gpu_adjoint_kernel`](@ref).
-
-Run this function and store the results for later use when calling [`mul!`](@ref)
-with GPU data.
-"""
-function FDGrids.optimal_adjoint_threads(y::AbstractArray,
-                                         A::AdjointDiffMatrix{T, WIDTH},
-                                         x::AbstractArray,
-                                          ::Val{DIM};
-                               max_threads=nothing) where {T, WIDTH, DIM}
-    k = @cuda launch=false _gpu_adjoint_kernel!(
-        y, A.coeffs, x, Int32.(size(x)), Val(Int32(DIM)), Val(Int32(WIDTH))
-    )
-    threads = launch_configuration(k.fun).threads
-    return isnothing(max_threads) ? threads : min(threads, max_threads)
-end
-
 
 # ================================================================================
 # Public mul! dispatch
@@ -556,18 +527,15 @@ function LinearAlgebra.mul!(y::AbstractArray{S, N},
     sz     = Int32.(size(x))
     total  = length(x)
 
-    if TH <: Nothing
-        kernel = @cuda launch=false _gpu_forward_kernel!(
-            y, A.coeffs, x, sz, Val(Int32(DIM)), Val(Int32(WIDTH)))
-
-        threads, blocks = _launch_config(kernel, total, nthreads)
-        kernel(y, A.coeffs, x, sz, Val(Int32(DIM)), Val(Int32(WIDTH));
-            threads, blocks)
+    # kernel configuration
+    kernel_args = (y, A.coeffs, x, sz, Val(Int32(DIM)), Val(Int32(WIDTH)))
+    _nthreads = if TH <: Nothing
+        _get_launch_params(_gpu_forward_kernel!, kernel_args...)
     else
-        @cuda threads=nthreads blocks=cld(total, nthreads) _gpu_forward_kernel!(
-            y, A.coeffs, x, sz, Val(Int32(DIM)), Val(Int32(WIDTH))
-        )
+        Int32(nthreads)
     end
+
+    @cuda threads=_nthreads blocks=Int32(cld(total, _nthreads)) _gpu_forward_kernel!(kernel_args...)
 
     return y
 end
@@ -615,27 +583,28 @@ function LinearAlgebra.mul!(y::AbstractArray{S, N},
                              ::Val{DIM} =Val(1);
                             nthreads::TH=nothing
                             ) where {T, S, N, WIDTH, P, DIM, TH<:Union{Nothing, Int}}
+    # Rank cap of 4 reflects the rank cap of the CPU code path and keeps the
+    # generated kernel compilation footprint bounded. Most callers use N ≤ 3.
     N   in 1:4 || throw(ArgumentError("N must be in 1:4"))
     DIM in 1:N || throw(ArgumentError("DIM must be in 1:N"))
     size(A, 1) > 2 * WIDTH ||
         throw(ArgumentError("GPU adjoint requires size(A,1) > 2*WIDTH"))
     _check_shapes(y, A, x, Val(DIM))
 
+    # `sz` is passed as a kernel argument so the device kernel can decompose
+    # the flat thread id into N-D indices without a dynamic shape query.
     sz     = Int32.(size(x))
     total  = length(x)
 
-    if TH <: Nothing
-        kernel = @cuda launch=false _gpu_adjoint_kernel!(
-            y, A.coeffs, x, sz, Val(Int32(DIM)), Val(Int32(WIDTH)))
-
-        threads, blocks = _launch_config(kernel, total, nthreads)
-        kernel(y, A.coeffs, x, sz, Val(Int32(DIM)), Val(Int32(WIDTH));
-            threads, blocks)
+    # kernel configuration
+    kernel_args = (y, A.coeffs, x, sz, Val(Int32(DIM)), Val(Int32(WIDTH)))
+    _nthreads = if TH <: Nothing
+        _get_launch_params(_gpu_adjoint_kernel!, kernel_args...)
     else
-        @cuda threads=nthreads blocks=cld(total, nthreads) _gpu_adjoint_kernel!(
-            y, A.coeffs, x, sz, Val(Int32(DIM)), Val(Int32(WIDTH))
-        )
+        Int32(nthreads)
     end
+
+    @cuda threads=_nthreads blocks=Int32(cld(total, _nthreads)) _gpu_adjoint_kernel!(kernel_args...)
 
     return y
 end

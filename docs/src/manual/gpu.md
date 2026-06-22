@@ -133,6 +133,11 @@ mul!(yg, Dg, ug)                           # auto-tuned
 mul!(yg, Dg, ug; nthreads = 128)           # explicit block size
 ```
 
+The result of the auto-tuned `mul!` is stored for any remaining calls to `mul!`
+with the same argument types, persistent for the lifetime of the Julia session.
+To reset this cached result, call `FDGrids.reset_launch_params()`, which will
+prompt `mul!` to perform auto-tuning the next time it is called.
+
 The result of the multiplication does not depend on the block size, only the
 runtime.
 
