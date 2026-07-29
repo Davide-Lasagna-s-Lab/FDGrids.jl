@@ -244,7 +244,7 @@ _x_idx(DIM::Integer, N::Integer, kexpr) =
 # ================================================================================
 
 """
-    _gpu_forward_kernel!(y, A_coeffs, x, sz, ::Val{DIM}, ::Val{WIDTH})
+    _gpu_forward_kernel!(y, A_coeffs, x, sz, global_idx, local_rng, ::Val{DIM}, ::Val{WIDTH})
 
 Apply the forward `DiffMatrix` operator along dimension `DIM`.
 
@@ -274,10 +274,13 @@ without per-iteration pointer arithmetic.
 This function should not be called directly. The host-side `mul!` method
 takes care of launching it with an appropriate block / grid configuration.
 """
+# TODO: this kernel
 @generated function _gpu_forward_kernel!(y, A_coeffs, x,
                                          sz::NTuple{N, Int32},
-                                         ::Val{DIM},
-                                         ::Val{WIDTH}) where {N, DIM, WIDTH}
+                                 global_idx::Int,
+                                  local_rng::UnitRange,
+                                           ::Val{DIM},
+                                           ::Val{WIDTH}) where {N, DIM, WIDTH}
     HWIDTH = WIDTH >> 1
     Wi32   = Int32(WIDTH)
     Hi32   = Int32(HWIDTH)
@@ -360,8 +363,8 @@ the host-side `mul!` method takes care of launch configuration.
 """
 @generated function _gpu_adjoint_kernel!(y, A_coeffs, x,
                                          sz::NTuple{N, Int32},
-                                         ::Val{DIM},
-                                         ::Val{WIDTH}) where {N, DIM, WIDTH}
+                                           ::Val{DIM},
+                                           ::Val{WIDTH}) where {N, DIM, WIDTH}
     HWIDTH = WIDTH >> 1
     Wi32   = Int32(WIDTH)
     Hi32   = Int32(HWIDTH)
@@ -452,19 +455,25 @@ end
 # ================================================================================
 
 """
-    _check_shapes(y, A, x, ::Val{DIM})
+    _check_shapes(y, A, x, ::Val{DIM}, global_idx, local_rng)
 
 Validate the array shape conventions shared by both GPU `mul!` methods.
 
 The differentiated dimension of `x` and `y` must equal `size(A, 1)`, and the
 two arrays must otherwise have identical shape. Throws `ArgumentError` with a
-descriptive message if either condition is violated.
+descriptive message if either condition is violated. Also checks that the
+global_idx and local_rng are valid for the sizes of the input/output arrays
+and differentiation operator `A` along the dimension `DIM`.
 """
-@inline function _check_shapes(y, A, x, ::Val{DIM}) where {DIM}
+@inline function _check_shapes(y, A, x, ::Val{DIM}, global_idx, local_rng) where {DIM}
     size(x, DIM) == size(y, DIM) == size(A, 1) ||
         throw(ArgumentError("inconsistent sizes"))
     size(x) == size(y) ||
         throw(ArgumentError("y and x must have the same shape"))
+    local_rng[1] > 0 && local_rng[end] ≤ size(x, DIM) ||
+        throw(ArgumentError("out of bounds local range specification"))
+    global_idx > 0 && global_idx + local_rng[end] - 1 ≤ size(A, 1) ||
+        throw(ArgumentError("out of bounds global/local range specification"))
     return nothing
 end
 
@@ -475,7 +484,11 @@ end
 
 """
     LinearAlgebra.mul!(y, A::DiffMatrix{T, WIDTH, OPTIMISE, <:CuArray},
-                       x, ::Val{DIM} = Val(1); nthreads = nothing) -> y
+                       x, ::Val{DIM}=Val(1), ::Val{ADD}=Val(false);
+                       nthreads=nothing) -> y
+    LinearAlgebra.mul!(y, A::DiffMatrix{T, WIDTH, OPTIMISE, <:CuArray},
+                       x, ::Val{DIM}=Val(1), global_idx, local_rng,
+                       ::Val{ADD}=Val(false); nthreads=nothing) -> y
 
 Apply the forward finite-difference operator `A` on the GPU.
 
@@ -490,11 +503,22 @@ The host validates shapes, picks a launch configuration via
 `nthreads` keyword overrides the per-block thread count and is intended for
 benchmarks; the auto-tuned default is sufficient for production use.
 
+By passing `global_idx` and `local_rng`, the forward operator is applied to
+selected rows of domain-decomposed storage. This method is intended for domain-
+decomposed callers. Ordinary local arrays should use `mul!(y, A, x, Val(DIM))`.
+`x` must provide every stencil entry needed to evaluate `local_rng`. It may
+store halo rows inside its ordinary axes and shift `local_rng` inward, or expose
+ghost cells through halo-aware scalar indices outside those axes. In both
+cases, `global_idx` describes local index `1`, not `first(local_rng)`.
+
 # Arguments
 - `y`: output array, same shape as `x`.
 - `A`: a GPU-resident `DiffMatrix`.
 - `x`: input array; `size(x, DIM)` must equal `size(A, 1)`.
 - `Val{DIM}`: dimension to differentiate along, defaults to `1`.
+- `global_idx`: global row index corresponding to local index `1` of `x`/`y`.
+- `local_rng`: local portion of dimension `DIM` to process.
+- `ADD`: when `true`, add the result into `y` instead of overwriting it.
 - `nthreads`: optional per-block thread-count override.
 
 # Examples
@@ -503,32 +527,40 @@ using CUDA, FDGrids, LinearAlgebra
 
 xs = range(-1, 1; length = 256)
 D  = DiffMatrix(xs, 5, 1)
-Dg = cu(D)
+Dg = CUDA.cu(D)
 
 u  = CuArray(Float32.(sin.(xs)))
 du = similar(u)
 mul!(du, Dg, u)
+
+xs_rng = xs[65:128]
+u = CuArray(Float32.(sin.(xs_rng)))
+du = similar(u)
+mul!(du, Dg, u, Val(1), 65, 65:128, Val(true))
 ```
 """
 function LinearAlgebra.mul!(y::AbstractArray{S, N},
                             A::DiffMatrix{T, WIDTH, OPTIMISE, <:CuArray},
                             x::AbstractArray{S, N},
-                             ::Val{DIM} =Val(1);
-                            nthreads::TH=nothing
-                            ) where {T, S, N, WIDTH, OPTIMISE, DIM, TH<:Union{Nothing, Int}}
+                             ::Val{DIM}=Val(1),
+                   global_idx::Int,
+                    local_rng::UnitRange,
+                             ::Val{ADD}=Val(false);
+                     nthreads::TH=nothing) where {T, S, N, WIDTH, OPTIMISE, DIM, ADD, TH<:Union{Nothing, Int}}
     # Rank cap of 4 reflects the rank cap of the CPU code path and keeps the
     # generated kernel compilation footprint bounded. Most callers use N ≤ 3.
     N   in 1:4 || throw(ArgumentError("N must be in 1:4"))
     DIM in 1:N || throw(ArgumentError("DIM must be in 1:N"))
-    _check_shapes(y, A, x, Val(DIM))
+    ADD isa Bool || throw(ArgumentError("ADD must be true or false"))
+    _check_shapes(y, A, x, Val(DIM), global_idx, local_rng)
 
     # `sz` is passed as a kernel argument so the device kernel can decompose
     # the flat thread id into N-D indices without a dynamic shape query.
-    sz     = Int32.(size(x))
-    total  = length(x)
+    sz     = map(Int32, size(x))
+    total  = Int32(length(x))
 
     # kernel configuration
-    kernel_args = (y, A.coeffs, x, sz, Val(Int32(DIM)), Val(Int32(WIDTH)))
+    kernel_args = (y, A.coeffs, x, sz, global_idx, local_rng, Val(Int32(DIM)), Val(Int32(WIDTH)))
     _nthreads = if TH <: Nothing
         _get_launch_params(_gpu_forward_kernel!, kernel_args...)
     else
@@ -540,6 +572,17 @@ function LinearAlgebra.mul!(y::AbstractArray{S, N},
     return y
 end
 
+LinearAlgebra.mul!(y::AbstractArray{S, N},
+                   A::DiffMatrix{T, WIDTH, OPTIMISE, <:CuArray},
+                   x::AbstractArray{S, N},
+                    ::Val{DIM}=Val(1),
+                    ::Val{ADD}=Val(false);
+            nthreads::TH=nothing
+                   ) where {T, S, N, WIDTH, OPTIMISE, DIM, ADD, TH<:Union{Nothing, Int}} =
+    LinearAlgebra.mul!(y, A, x, Val(DIM), 1, 1:size(x, DIM), Val(ADD))
+
+
+# TODO: redo with similar approach as DiffMatrix methods
 """
     LinearAlgebra.mul!(y, A::AdjointDiffMatrix{T, WIDTH, P, <:CuArray},
                        x, ::Val{DIM} = Val(1); nthreads = nothing) -> y
@@ -581,7 +624,7 @@ function LinearAlgebra.mul!(y::AbstractArray{S, N},
                             A::AdjointDiffMatrix{T, WIDTH, P, <:CuArray},
                             x::AbstractArray{S, N},
                              ::Val{DIM} =Val(1);
-                            nthreads::TH=nothing
+                     nthreads::TH=nothing
                             ) where {T, S, N, WIDTH, P, DIM, TH<:Union{Nothing, Int}}
     # Rank cap of 4 reflects the rank cap of the CPU code path and keeps the
     # generated kernel compilation footprint bounded. Most callers use N ≤ 3.
