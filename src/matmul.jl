@@ -296,8 +296,8 @@ mul!(dA, D, A, Val(1))
 function LinearAlgebra.mul!(y::AbstractArray{S, N},
                             A::DiffMatrix{T, WIDTH},
                             x::AbstractArray{S, N},
-                             ::Val{DIM}  = Val(1),
-                             ::Val{ADD}  = Val(false)) where {T, S, N, WIDTH, DIM, ADD}
+                             ::Val{DIM}=Val(1),
+                             ::Val{ADD}=Val(false)) where {T, S, N, WIDTH, DIM, ADD}
     size(x, DIM) == size(y, DIM) == size(A, 1) ||
         throw(ArgumentError("inconsistent inputs size"))
     return LinearAlgebra.mul!(y, A, x, Val(DIM), 1, 1:size(x, DIM), Val(ADD))
@@ -378,8 +378,8 @@ mul!(y, Dt, cos.(xs))
 function LinearAlgebra.mul!(y::AbstractArray{S, N},
                             A::AdjointDiffMatrix{T, WIDTH, P, <:AbstractArray},
                             x::AbstractArray{S, N},
-                             ::Val{DIM}  = Val(1),
-                             ::Val{ADD}  = Val(false)) where {T, S, N, WIDTH, P, DIM, ADD}
+                             ::Val{DIM}=Val(1),
+                             ::Val{ADD}=Val(false)) where {T, S, N, WIDTH, P, DIM, ADD}
     size(x, DIM) == size(y, DIM) == size(A, 1) ||
         throw(ArgumentError("inconsistent inputs size"))
     return LinearAlgebra.mul!(y, A, x, Val(DIM), 1, 1:size(x, DIM), Val(ADD))

@@ -258,9 +258,9 @@ into N-D cartesian indices, then the stencil dot product is evaluated using
 of `x` whose first index along `DIM` (the "base") depends on the boundary
 region:
 
-  - **head** `i ≤ HWIDTH`             → `base = 1`
+  - **head** `i ≤ HWIDTH`              → `base = 1`
   - **body** `HWIDTH < i ≤ M - HWIDTH` → `base = i - HWIDTH`
-  - **tail** `i > M - HWIDTH`           → `base = M - WIDTH + 1`
+  - **tail** `i > M - HWIDTH`          → `base = M - WIDTH + 1`
 
 The dot product is fully unrolled at generation time because `WIDTH` is a
 type parameter. The coefficient row for output `i` always starts at index
@@ -380,9 +380,9 @@ Apply the transposed `AdjointDiffMatrix` operator along dimension `DIM`.
 The adjoint coefficient layout has variable-length boundary rows. For output
 index `j` along `DIM`, the stencil reads:
 
-  - **head**, `j ≤ WIDTH`:           `start = 1`,        `len = j + HWIDTH`
+  - **head**, `j ≤ WIDTH`:           `start = 1`,          `len = j + HWIDTH`
   - **body**, `WIDTH < j ≤ M-WIDTH`: `start = j - HWIDTH`, `len = WIDTH`
-  - **tail**, `j > M - WIDTH`:        `start = j - HWIDTH`, `len = M - j + HWIDTH + 1`
+  - **tail**, `j > M - WIDTH`:       `start = j - HWIDTH`, `len = M - j + HWIDTH + 1`
 
 with pointers into `A_coeffs` given in closed form by `_ptr_for_j`. The body
 case is the hot path and is fully unrolled, exactly like the forward kernel.
@@ -391,13 +391,17 @@ divergence is confined to the first and last `WIDTH` outputs along DIM.
 
 # Arguments
 Identical in role to [`_gpu_forward_kernel!`](@ref): `y`, `A_coeffs`, `x`,
-`sz`, `Val{DIM}`, `Val{WIDTH}`. The kernel should not be called directly —
-the host-side `mul!` method takes care of launch configuration.
-"""
+`sz`, `global_idx`, `local_rng`, `Val{DIM}`, `Val{WIDTH}`, `Val{ADD}`. The
+kernel should not be called directly - the host-side `mul!` method takes
+care of launch configuration.
+""" # TODO: this method for decomposed domains
 @generated function _gpu_adjoint_kernel!(y, A_coeffs, x,
                                          sz::NTuple{N, Int32},
+                                 global_idx::Int,
+                                  local_rng::UnitRange,
                                            ::Val{DIM},
-                                           ::Val{WIDTH}) where {N, DIM, WIDTH}
+                                           ::Val{WIDTH},
+                                           ::Val{ADD}) where {N, DIM, WIDTH, ADD}
     HWIDTH = WIDTH >> 1
     Wi32   = Int32(WIDTH)
     Hi32   = Int32(HWIDTH)
@@ -517,7 +521,7 @@ end
                        x, ::Val{DIM}=Val(1), ::Val{ADD}=Val(false);
                        nthreads=nothing) -> y
     LinearAlgebra.mul!(y, A::DiffMatrix{T, WIDTH, OPTIMISE, <:CuArray},
-                       x, ::Val{DIM}=Val(1), global_idx, local_rng,
+                       x, ::Val{DIM}, global_idx, local_rng,
                        ::Val{ADD}=Val(false); nthreads=nothing) -> y
 
 Apply the forward finite-difference operator `A` on the GPU.
@@ -614,10 +618,12 @@ function LinearAlgebra.mul!(y::AbstractArray{S, N},
 end
 
 
-# TODO: redo with similar approach as DiffMatrix methods
 """
     LinearAlgebra.mul!(y, A::AdjointDiffMatrix{T, WIDTH, P, <:CuArray},
-                       x, ::Val{DIM} = Val(1); nthreads = nothing) -> y
+                       x, ::Val{DIM}=Val(1); nthreads=nothing) -> y
+    LinearAlgebra.mul!(y, A::AdjointDiffMatrix{T, WIDTH, P, <:CuArray},
+                       x, ::Val{DIM}, global_idx, local_rng,
+                       ::Val{ADD}=Val(false); nthreads=nothing) -> y
 
 Apply the transposed finite-difference operator `A` on the GPU.
 
@@ -631,11 +637,21 @@ The adjoint requires `size(A, 1) > 2 * WIDTH`, which is the same constraint
 the CPU adjoint constructor enforces; it is re-checked here as a defence in
 depth in case the operator was constructed by hand.
 
+By passing `global_idx` and `local_rng`, the adjoint operator is applied to
+selected rows of domain-decomposed storage. This method is intended for domain-
+decomposed callers. Ordinary local arrays should use `mul!(y, A, x, Val(DIM))`.
+`x` must provide every stencil entry needed to evaluate `local_rng`. It may
+store halo rows inside its ordinary axes and shift `local_rng` inward, or expose
+ghost cells through halo-aware scalar indices outside those axes. In both
+cases, `global_idx` describes local index `1`, not `first(local_rng)`.
+
 # Arguments
 - `y`: output array, same shape as `x`.
 - `A`: a GPU-resident `AdjointDiffMatrix`.
 - `x`: input array; `size(x, DIM)` must equal `size(A, 1)`.
 - `Val{DIM}`: dimension to apply the adjoint along, defaults to `1`.
+- `global_idx`: global row index corresponding to local index `1` of `x`/`y`.
+- `local_rng`: local portion of dimension `DIM` to process.
 - `nthreads`: optional per-block thread-count override.
 
 # Examples
@@ -655,13 +671,17 @@ mul!(y, Ag, v)
 function LinearAlgebra.mul!(y::AbstractArray{S, N},
                             A::AdjointDiffMatrix{T, WIDTH, P, <:CuArray},
                             x::AbstractArray{S, N},
-                             ::Val{DIM} =Val(1);
+                             ::Val{DIM},
+                   global_idx::Int,
+                    local_rng::UnitRange,
+                             ::Val{ADD}=Val(false);
                      nthreads::TH=nothing
-                            ) where {T, S, N, WIDTH, P, DIM, TH<:Union{Nothing, Int}}
+                            ) where {T, S, N, WIDTH, P, DIM, ADD, TH<:Union{Nothing, Int}}
     # Rank cap of 4 reflects the rank cap of the CPU code path and keeps the
     # generated kernel compilation footprint bounded. Most callers use N ≤ 3.
     N   in 1:4 || throw(ArgumentError("N must be in 1:4"))
     DIM in 1:N || throw(ArgumentError("DIM must be in 1:N"))
+    ADD isa Bool || throw(ArgumentError("ADD must be true or false"))
     size(A, 1) > 2 * WIDTH ||
         throw(ArgumentError("GPU adjoint requires size(A,1) > 2*WIDTH"))
     _check_shapes(y, A, x, Val(DIM), 1, 1:size(x, DIM))
@@ -672,7 +692,7 @@ function LinearAlgebra.mul!(y::AbstractArray{S, N},
     total  = length(x)
 
     # kernel configuration
-    kernel_args = (y, A.coeffs, x, sz, Val(Int32(DIM)), Val(Int32(WIDTH)))
+    kernel_args = (y, A.coeffs, x, sz, global_idx, local_rng, Val(Int32(DIM)), Val(Int32(WIDTH)), Val(ADD))
     _nthreads = if TH <: Nothing
         _get_launch_params(_gpu_adjoint_kernel!, kernel_args...)
     else
@@ -682,6 +702,18 @@ function LinearAlgebra.mul!(y::AbstractArray{S, N},
     @cuda threads=_nthreads blocks=Int32(cld(total, _nthreads)) _gpu_adjoint_kernel!(kernel_args...)
 
     return y
+end
+
+function LinearAlgebra.mul!(y::AbstractArray{S, N},
+                            A::AdjointDiffMatrix{T, WIDTH, P, <:CuArray},
+                            x::AbstractArray{S, N},
+                             ::Val{DIM}=Val(1),
+                             ::Val{ADD}=Val(false);
+                     nthreads::TH=nothing
+                            ) where {T, S, N, WIDTH, P, DIM, ADD, TH<:Union{Nothing, Int}}
+    size(x, DIM) == size(y, DIM) == size(A, 1) ||
+        throw(ArgumentError("inconsistent sizes"))
+    return LinearAlgebra.mul!(y, A, x, Val(DIM), 1, 1:size(x, DIM), Val(ADD))
 end
 
 end
