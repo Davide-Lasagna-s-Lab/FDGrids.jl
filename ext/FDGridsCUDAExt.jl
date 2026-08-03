@@ -634,18 +634,6 @@ function LinearAlgebra.mul!(y::AbstractArray{S, N},
     return y
 end
 
-# FIXME: this method can be completely removed
-function LinearAlgebra.mul!(y::AbstractArray{S, N},
-                            A::DiffMatrix{T, WIDTH, OPTIMISE, <:CuArray},
-                            x::AbstractArray{S, N},
-                             ::Val{DIM}=Val(1),
-                             ::Val{ADD}=Val(false);
-                     nthreads::TH=nothing) where {T, S, N, WIDTH, OPTIMISE, DIM, ADD, TH<:Union{Nothing, Int}}
-    size(x, DIM) == size(y, DIM) == size(A, 1) ||
-        throw(ArgumentError("inconsistent sizes"))
-    return LinearAlgebra.mul!(y, A, x, Val(DIM), 1, 1:size(x, DIM), Val(ADD))
-end
-
 
 """
     LinearAlgebra.mul!(y, A::AdjointDiffMatrix{T, WIDTH, P, <:CuArray},
@@ -731,19 +719,6 @@ function LinearAlgebra.mul!(y::AbstractArray{S, N},
     @cuda threads=_nthreads blocks=Int32(cld(total, _nthreads)) _gpu_adjoint_kernel!(kernel_args...)
 
     return y
-end
-
-# FIXME: this method can be completely removed
-function LinearAlgebra.mul!(y::AbstractArray{S, N},
-                            A::AdjointDiffMatrix{T, WIDTH, P, <:CuArray},
-                            x::AbstractArray{S, N},
-                             ::Val{DIM}=Val(1),
-                             ::Val{ADD}=Val(false);
-                     nthreads::TH=nothing
-                            ) where {T, S, N, WIDTH, P, DIM, ADD, TH<:Union{Nothing, Int}}
-    size(x, DIM) == size(y, DIM) == size(A, 1) ||
-        throw(ArgumentError("inconsistent sizes"))
-    return LinearAlgebra.mul!(y, A, x, Val(DIM), 1, 1:size(x, DIM), Val(ADD))
 end
 
 end
