@@ -240,7 +240,7 @@ _x_idx(DIM::Integer, N::Integer, kexpr) =
 
 
 _build_assignment(idx_expr, add) = add ? :(y[$idx_expr...] += s) :
-                                         :(y[$idx_expr...] = s)
+                                         :(y[$idx_expr...]  = s)
 
 
 # ================================================================================
@@ -248,7 +248,9 @@ _build_assignment(idx_expr, add) = add ? :(y[$idx_expr...] += s) :
 # ================================================================================
 
 """
-    _gpu_forward_kernel!(y, A_coeffs, x, sz, global_idx, local_rng, ::Val{DIM}, ::Val{WIDTH})
+    _gpu_forward_kernel!(y, A_coeffs, x, sz,
+                         global_idx, local_rng,
+                         ::Val{DIM}, ::Val{WIDTH}, ::Val{ADD})
 
 Apply the forward `DiffMatrix` operator along dimension `DIM`.
 
@@ -276,6 +278,7 @@ without per-iteration pointer arithmetic.
 - `local_rng`: local portion of dimension `DIM` to process.
 - `Val{DIM}`: dimension to differentiate along (1-based).
 - `Val{WIDTH}`: stencil width (odd, ≥ 3).
+- `Val{ADD}`: when `ADD=true`, add the result into `y` instead of overwriting it.
 
 This function should not be called directly. The host-side `mul!` method
 takes care of launching it with an appropriate block / grid configuration.
@@ -355,6 +358,7 @@ takes care of launching it with an appropriate block / grid configuration.
         # Boundary-aware stencil base. Branching here is unavoidable, but only
         # the first/last HWIDTH outputs along DIM diverge from the centered
         # case, so warp divergence is confined to thin boundary slabs.
+        # FIXME: I think the tail branch here only works if `last(local_rng)` is the final global element (need to include goffset somehow?)
         base = i ≤ $Hi32     ? 1i32 - goffset                 :
                i > M - $Hi32 ? last(local_rng) - $Wi32 + 1i32 :
                $iDIM - $Hi32
@@ -373,7 +377,9 @@ end
 # ================================================================================
 
 """
-    _gpu_adjoint_kernel!(y, A_coeffs, x, sz, ::Val{DIM}, ::Val{WIDTH})
+    _gpu_adjoint_kernel!(y, A_coeffs, x, sz,
+                         global_idx, local_rng,
+                         ::Val{DIM}, ::Val{WIDTH})
 
 Apply the transposed `AdjointDiffMatrix` operator along dimension `DIM`.
 
@@ -394,7 +400,7 @@ Identical in role to [`_gpu_forward_kernel!`](@ref): `y`, `A_coeffs`, `x`,
 `sz`, `global_idx`, `local_rng`, `Val{DIM}`, `Val{WIDTH}`, `Val{ADD}`. The
 kernel should not be called directly - the host-side `mul!` method takes
 care of launch configuration.
-""" # TODO: this method for decomposed domains
+"""
 @generated function _gpu_adjoint_kernel!(y, A_coeffs, x,
                                          sz::NTuple{N, Int32},
                                  global_idx::Int,
@@ -409,18 +415,25 @@ care of launch configuration.
     iDIM    = Symbol(:i_, DIM)
     out_idx = Expr(:tuple, ntuple(d -> Symbol(:i_, d), N)...)
 
+    # Sizes of the iteration space: same as sz (the true shape of x/y)
+    # along every dimension except DIM, where only local_rng's length is
+    # being processed by this launch.
+    # FIXME: isn't `ntuple` already a tuple???
+    local_sizes = Expr(:tuple,
+                        ntuple(d -> d == DIM ? :(n_local) : :(sz[$d]), N)...)
+
     # ----- Body: fully unrolled WIDTH-tap sum, identical pattern to the
     # forward kernel. Coefficient row for output j starts at (j-1)*WIDTH + 1,
     # because the body has WIDTH-wide rows just like the parent matrix.
     body_block = quote
         ptr = (j - 1i32) * $Wi32 + 1i32
-        s   = A_coeffs[ptr] * x[$(_x_idx(DIM, N, :(j - $Hi32)))...]
+        s   = A_coeffs[ptr] * x[$(_x_idx(DIM, N, :($iDIM - $Hi32)))...]
     end
     for p in 1:(WIDTH - 1)
         pi32 = Int32(p)
         push!(body_block.args,
               :(s += A_coeffs[ptr + $pi32] *
-                     x[$(_x_idx(DIM, N, :(j - $Hi32 + $pi32)))...]))
+                     x[$(_x_idx(DIM, N, :($iDIM - $Hi32 + $pi32)))...]))
     end
 
     # ----- Head: variable-length sum from input index 1 up to j + HWIDTH.
@@ -435,7 +448,7 @@ care of launch configuration.
         s        = zero(eltype(y))
         for k in 0i32:(len - 1i32)
             s += A_coeffs[ptr_head + k] *
-                 x[$(_x_idx(DIM, N, :(1i32 + k)))...]
+                 x[$(_x_idx(DIM, N, :(1i32 - goffset + k)))...]
         end
     end
 
@@ -452,18 +465,35 @@ care of launch configuration.
         s        = zero(eltype(y))
         for k in 0i32:(len - 1i32)
             s += A_coeffs[ptr_tail + k] *
-                 x[$(_x_idx(DIM, N, :(j - $Hi32 + k)))...]
+                 x[$(_x_idx(DIM, N, :($iDIM - $Hi32 + k)))...]
         end
     end
 
+    # Build assignment expression
+    assignment = _build_assignment(out_idx, ADD)
+
     return quote
+        # Number of rows this launch is responsible for along DIM.
+        n_local = Int32(length(local_rng))
+
         idx = (blockIdx().x - 1i32) * blockDim().x + threadIdx().x - 1i32
-        idx ≥ prod(sz) && return nothing
+        idx ≥ prod($local_sizes) && return nothing
 
-        $(_build_decomp(:sz, N))
+        $(_build_decomp(local_sizes, N))
 
-        j = $iDIM
-        M = sz[$DIM]
+        # 0-based offset of this thread within local_rng.
+        off = $iDIM - 1i32
+
+        # True 1-based index into x/y along DIM.
+        $iDIM = Int32(first(local_rng)) + off
+
+        # Global index tracking
+        j = Int32(global_idx) + $iDIM - 1i32
+        M = Int32(length(A_coeffs)) ÷ $Wi32
+
+        # Constant offset between A's global numbering and x's local
+        # indexing (i - $iDIM is the same for every thread in this launch).
+        goffset = Int32(global_idx) - Int32(first(local_rng))
 
         # `local s` declares the accumulator at function scope so the
         # assignments and `+=` updates inside the branches and the inner
@@ -480,7 +510,7 @@ care of launch configuration.
             $tail_block
         end
 
-        @inbounds y[$out_idx...] = s
+        @inbounds $assignment
         return nothing
     end
 end
@@ -606,6 +636,7 @@ function LinearAlgebra.mul!(y::AbstractArray{S, N},
     return y
 end
 
+# FIXME: this method can be completely removed
 function LinearAlgebra.mul!(y::AbstractArray{S, N},
                             A::DiffMatrix{T, WIDTH, OPTIMISE, <:CuArray},
                             x::AbstractArray{S, N},
@@ -704,6 +735,7 @@ function LinearAlgebra.mul!(y::AbstractArray{S, N},
     return y
 end
 
+# FIXME: this method can be completely removed
 function LinearAlgebra.mul!(y::AbstractArray{S, N},
                             A::AdjointDiffMatrix{T, WIDTH, P, <:CuArray},
                             x::AbstractArray{S, N},

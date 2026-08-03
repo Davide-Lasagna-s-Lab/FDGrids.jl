@@ -244,6 +244,45 @@ end
     end
 end
 
+@testset "FDGridsCUDAExt: adjoint local range N-D        " begin
+    M = 64
+    OTHER = 3
+    N_SLABS = 4
+
+    @testset "T=$T N=$N DIM=$DIM width=$width slab=$slab add=$add" for
+            T        in (Float32, Float64),
+            N        in 1:4,
+            DIM      in 1:N,
+            width    in (3, 5, 7),
+            slab     in 0:(N_SLABS - 1),
+            add      in (false, true)
+
+        # adjoint requires M > 2*WIDTH for a non-empty body
+        M > 2 * width || continue
+        rtol  = T === Float32 ? _GPU_RTOL_F32 : _GPU_RTOL_F64
+        xs    = collect(range(-1.0, 1.0; length=M))
+        D     = DiffMatrix(xs, width, 1)
+        At    = adjoint(D)
+        Ag    = _gpu_op(At, T)
+        shape = ntuple(d -> d == DIM ? M÷N_SLABS : OTHER, N)
+
+        global_idx = 1 + shape[DIM]*slab
+        local_rng  = slab == 0           ? ((1               ):(shape[DIM] - (width >> 1))) :
+                     slab == N_SLABS - 1 ? ((1 + (width >> 1)):(shape[DIM]               )) :
+                                           ((1 + (width >> 1)):(shape[DIM] - (width >> 1)))
+
+        x_cpu = randn(shape...)
+        y_cpu = ones(eltype(x_cpu), size(x_cpu))
+        mul!(y_cpu, At, x_cpu, Val(DIM), global_idx, local_rng, Val(add))
+
+        xg = _gpu_in(x_cpu, T)
+        yg = CUDA.ones(eltype(xg), size(xg))
+        mul!(yg, Ag, xg, Val(DIM), global_idx, local_rng, Val(add))
+
+        @test Array(yg) ≈ T.(y_cpu) rtol = rtol
+    end
+end
+
 
 # ================================================================================
 # Weighted adjoint
