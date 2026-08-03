@@ -301,7 +301,7 @@ takes care of launching it with an appropriate block / grid configuration.
     # along every dimension except DIM, where only local_rng's length is
     # being processed by this launch.
     local_sizes = Expr(:tuple,
-                        ntuple(d -> d == DIM ? :(n_local) : :(sz[$d]), N)...)
+                        ntuple(d -> d == DIM ? :(n_local) : :(sz[$d]), Val(N))...)
 
     # Build the unrolled WIDTH-tap dot product as `s = c[ptr]*x[base] + …`,
     # parameterised by the runtime `base` that the kernel computes once per
@@ -358,9 +358,8 @@ takes care of launching it with an appropriate block / grid configuration.
         # Boundary-aware stencil base. Branching here is unavoidable, but only
         # the first/last HWIDTH outputs along DIM diverge from the centered
         # case, so warp divergence is confined to thin boundary slabs.
-        # FIXME: I think the tail branch here only works if `last(local_rng)` is the final global element (need to include goffset somehow?)
-        base = i ≤ $Hi32     ? 1i32 - goffset                 :
-               i > M - $Hi32 ? last(local_rng) - $Wi32 + 1i32 :
+        base = i ≤ $Hi32     ? 1i32 - goffset          :
+               i > M - $Hi32 ? sz[$DIM] - $Wi32 + 1i32 :
                $iDIM - $Hi32
 
         @inbounds begin
@@ -418,9 +417,8 @@ care of launch configuration.
     # Sizes of the iteration space: same as sz (the true shape of x/y)
     # along every dimension except DIM, where only local_rng's length is
     # being processed by this launch.
-    # FIXME: isn't `ntuple` already a tuple???
     local_sizes = Expr(:tuple,
-                        ntuple(d -> d == DIM ? :(n_local) : :(sz[$d]), N)...)
+                        ntuple(d -> d == DIM ? :(n_local) : :(sz[$d]), Val(N))...)
 
     # ----- Body: fully unrolled WIDTH-tap sum, identical pattern to the
     # forward kernel. Coefficient row for output j starts at (j-1)*WIDTH + 1,
