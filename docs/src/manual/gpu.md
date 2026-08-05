@@ -18,16 +18,16 @@ using LinearAlgebra
 
 The extension provides GPU implementations of:
 
-- `mul!(y, D::DiffMatrix, x, Val(DIM))` — forward operator along any axis.
-- `mul!(y, A::AdjointDiffMatrix, x, Val(DIM))` — adjoint operator along any axis.
-- `cu(D)` and `cu(adjoint(D))` — host-to-device transfer (Float64 → Float32).
-- `Adapt.adapt(CuArray, D)` — host-to-device transfer preserving precision.
+- `mul!(y, D::DiffMatrix, x, Val(DIM))` - forward operator along any axis.
+- `mul!(y, D::DiffMatrix, x, Val(DIM), global_idx, local_rng, Val(ADD))` - forward operator over a a range of `D` for a decomposed input/output pair.
+- `mul!(y, A::AdjointDiffMatrix, x, Val(DIM))` - adjoint operator along any axis.
+- `mul!(y, A::AdjointDiffMatrix, x, Val(DIM), global_idx, local_rng, Val(ADD))` - adjoint operator over a a range of `D` for a decomposed input/output pair.
+- `CUDA.cu(D)` and `CUDA.cu(adjoint(D))` - host-to-device transfer (Float64 → Float32).
+- `Adapt.adapt(CuArray, D)` - host-to-device transfer preserving precision.
 
 What is **not** supported on the GPU:
 
 - `lu!`, `ldiv!`, and any of the banded solve routines in `linalg.jl`.
-- The 6-argument distributed `mul!` entry that takes `global_idx` and
-  `local_rng`. Decomposed-domain GPU applications remain a future addition.
 - Scalar indexing (`D[i, j]`, `full(D)`, etc.) on device-side operators. Use
   `Array(D.coeffs)` to bring coefficients back to the host first.
 
@@ -100,6 +100,8 @@ ux2 = similar(u2)
 mul!(ux2, Dx, u2, Val(1))                  # differentiate along axis 1
 ```
 
+See [`Decomposed Domains`](./decomposed-domains.md) page for details on how to use the 6-argument variant.
+
 ## Applying the Adjoint
 
 The adjoint dispatch mirrors the forward one. Both ordinary and weighted
@@ -120,6 +122,8 @@ mul!(y, Awg, v)
 Build the adjoint on the host, then `cu` (or `Adapt.adapt`) the result. The
 adjoint constructor uses host-side scalar indexing internally, so building it
 directly from a GPU `DiffMatrix` is not supported.
+
+See [`Decomposed Domains`](./decomposed-domains.md) page for details on how to use the 6-argument variant.
 
 ## Tuning the Launch Configuration
 

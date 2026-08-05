@@ -278,3 +278,5 @@ For weighted adjoints, this expands the weighted operator represented by
 `A.coeffs`, not merely the unweighted transpose of the parent matrix.
 """
 full(A::AdjointDiffMatrix{T}) where {T} = [A[i, j] for i in 1:size(A, 1), j in 1:size(A, 2)]
+
+# FIXME: broadcasting should really be defined here somehow

@@ -296,11 +296,12 @@ mul!(dA, D, A, Val(1))
 function LinearAlgebra.mul!(y::AbstractArray{S, N},
                             A::DiffMatrix{T, WIDTH},
                             x::AbstractArray{S, N},
-                             ::Val{DIM}  = Val(1),
-                             ::Val{ADD}  = Val(false)) where {T, S, N, WIDTH, DIM, ADD}
+                             ::Val{DIM}=Val(1),
+                             ::Val{ADD}=Val(false);
+                    kwargs...) where {T, S, N, WIDTH, DIM, ADD}
     size(x, DIM) == size(y, DIM) == size(A, 1) ||
         throw(ArgumentError("inconsistent inputs size"))
-    return LinearAlgebra.mul!(y, A, x, Val(DIM), 1, 1:size(x, DIM), Val(ADD))
+    return LinearAlgebra.mul!(y, A, x, Val(DIM), 1, 1:size(x, DIM), Val(ADD); kwargs...)
 end
 
 """
@@ -376,13 +377,14 @@ mul!(y, Dt, cos.(xs))
 ```
 """
 function LinearAlgebra.mul!(y::AbstractArray{S, N},
-                            A::AdjointDiffMatrix{T, WIDTH, P, <:AbstractArray},
+                            A::AdjointDiffMatrix{T, WIDTH, P},
                             x::AbstractArray{S, N},
-                             ::Val{DIM}  = Val(1),
-                             ::Val{ADD}  = Val(false)) where {T, S, N, WIDTH, P, DIM, ADD}
+                             ::Val{DIM}=Val(1),
+                             ::Val{ADD}=Val(false);
+                    kwargs...) where {T, S, N, WIDTH, P, DIM, ADD}
     size(x, DIM) == size(y, DIM) == size(A, 1) ||
         throw(ArgumentError("inconsistent inputs size"))
-    return LinearAlgebra.mul!(y, A, x, Val(DIM), 1, 1:size(x, DIM), Val(ADD))
+    return LinearAlgebra.mul!(y, A, x, Val(DIM), 1, 1:size(x, DIM), Val(ADD); kwargs...)
 end
 
 """
@@ -403,12 +405,12 @@ ghost cells through halo-aware scalar indices outside those axes. In both
 cases, `global_idx` describes local index `1`, not `first(local_rng)`.
 """
 @generated function LinearAlgebra.mul!(y::AbstractArray{T, N},
-                                       A::AdjointDiffMatrix{TD, WIDTH},
+                                       A::AdjointDiffMatrix{TD, WIDTH, P},
                                        x::AbstractArray{T, N},
                                         ::Val{DIM},
                               global_idx::Int,
                                local_rng::UnitRange,
-                                        ::Val{ADD}=Val(false)) where {T, TD, N, WIDTH, DIM, ADD}
+                                        ::Val{ADD}=Val(false)) where {T, TD, N, WIDTH, P, DIM, ADD}
     DIM in 1:N || throw(ArgumentError("inconsistent differentiation dimension"))
     ADD isa Bool || throw(ArgumentError("ADD must be true or false"))
 

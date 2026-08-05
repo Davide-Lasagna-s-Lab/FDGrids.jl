@@ -212,13 +212,13 @@ layout, so consecutive threads walk dimension 1 first. The expression is
 spliced into the generated kernel body, where `idx` and `sz` are already in
 scope.
 """
-function _build_decomp(N::Int)
+function _build_decomp(sz, N::Int)
     decomp = quote
         rem_ = idx
     end
     for d in 1:N
-        push!(decomp.args, :($(Symbol(:i_, d)) = (rem_ % sz[$d]) + 1i32))
-        push!(decomp.args, :(rem_ = rem_ ÷ sz[$d]))
+        push!(decomp.args, :($(Symbol(:i_, d)) = (rem_ % $sz[$d]) + 1i32))
+        push!(decomp.args, :(rem_ = rem_ ÷ $sz[$d]))
     end
     return decomp
 end
@@ -239,12 +239,18 @@ _x_idx(DIM::Integer, N::Integer, kexpr) =
     Expr(:tuple, ntuple(d -> d == DIM ? kexpr : Symbol(:i_, d), N)...)
 
 
+_build_assignment(idx_expr, add) = add ? :(y[$idx_expr...] += s) :
+                                         :(y[$idx_expr...]  = s)
+
+
 # ================================================================================
 # Forward kernel
 # ================================================================================
 
 """
-    _gpu_forward_kernel!(y, A_coeffs, x, sz, ::Val{DIM}, ::Val{WIDTH})
+    _gpu_forward_kernel!(y, A_coeffs, x, sz,
+                         global_idx, local_rng,
+                         ::Val{DIM}, ::Val{WIDTH}, ::Val{ADD})
 
 Apply the forward `DiffMatrix` operator along dimension `DIM`.
 
@@ -254,9 +260,9 @@ into N-D cartesian indices, then the stencil dot product is evaluated using
 of `x` whose first index along `DIM` (the "base") depends on the boundary
 region:
 
-  - **head** `i ≤ HWIDTH`             → `base = 1`
+  - **head** `i ≤ HWIDTH`              → `base = 1`
   - **body** `HWIDTH < i ≤ M - HWIDTH` → `base = i - HWIDTH`
-  - **tail** `i > M - HWIDTH`           → `base = M - WIDTH + 1`
+  - **tail** `i > M - HWIDTH`          → `base = M - WIDTH + 1`
 
 The dot product is fully unrolled at generation time because `WIDTH` is a
 type parameter. The coefficient row for output `i` always starts at index
@@ -268,23 +274,34 @@ without per-iteration pointer arithmetic.
 - `A_coeffs`: flat coefficient vector of length `M*WIDTH` (row-major).
 - `x`: input array with the same shape as `y`.
 - `sz`: the array shape as an `NTuple{N, Int32}`.
+- `global_idx`: global row index corresponding to local index `1` of `x`/`y`.
+- `local_rng`: local portion of dimension `DIM` to process.
 - `Val{DIM}`: dimension to differentiate along (1-based).
 - `Val{WIDTH}`: stencil width (odd, ≥ 3).
+- `Val{ADD}`: when `ADD=true`, add the result into `y` instead of overwriting it.
 
 This function should not be called directly. The host-side `mul!` method
 takes care of launching it with an appropriate block / grid configuration.
 """
 @generated function _gpu_forward_kernel!(y, A_coeffs, x,
                                          sz::NTuple{N, Int32},
-                                         ::Val{DIM},
-                                         ::Val{WIDTH}) where {N, DIM, WIDTH}
+                                 global_idx::Int,
+                                  local_rng::UnitRange,
+                                           ::Val{DIM},
+                                           ::Val{WIDTH},
+                                           ::Val{ADD}) where {N, DIM, WIDTH, ADD}
     HWIDTH = WIDTH >> 1
     Wi32   = Int32(WIDTH)
     Hi32   = Int32(HWIDTH)
 
     iDIM    = Symbol(:i_, DIM)
     out_idx = Expr(:tuple, ntuple(d -> Symbol(:i_, d), N)...)
-    decomp  = _build_decomp(N)
+
+    # Sizes of the iteration space: same as sz (the true shape of x/y)
+    # along every dimension except DIM, where only local_rng's length is
+    # being processed by this launch.
+    local_sizes = Expr(:tuple,
+                        ntuple(d -> d == DIM ? :(n_local) : :(sz[$d]), Val(N))...)
 
     # Build the unrolled WIDTH-tap dot product as `s = c[ptr]*x[base] + …`,
     # parameterised by the runtime `base` that the kernel computes once per
@@ -303,29 +320,51 @@ takes care of launching it with an appropriate block / grid configuration.
                      x[$(_x_idx(DIM, N, :(base + $pi32)))...]))
     end
 
+    # Build assignment expression
+    assignment = _build_assignment(out_idx, ADD)
+
     return quote
+        # Number of rows this launch is responsible for along DIM.
+        n_local = Int32(length(local_rng))
+
         # Flat 0-based thread id; threads past the end return without writing.
         idx = (blockIdx().x - 1i32) * blockDim().x + threadIdx().x - 1i32
-        idx ≥ prod(sz) && return nothing
+        idx ≥ prod($local_sizes) && return nothing
 
-        # Decompose into 1-based cartesian indices i_1, …, i_N.
-        $decomp
+        # Decompose into 1-based cartesian indices against the local sizes.
+        # i_DIM here is a 1..n_local offset *into* local_rng, not yet the
+        # true index into x/y along DIM.
+        $(_build_decomp(local_sizes, N))
 
-        # `i` is the row of the operator that this thread computes; `M` is the
-        # number of operator rows (= size of x along DIM).
-        i = $iDIM
-        M = sz[$DIM]
+        # 0-based offset of this thread within local_rng.
+        off = $iDIM - 1i32
+
+        # True 1-based index into x/y along DIM.
+        $iDIM = Int32(first(local_rng)) + off
+
+        # Row of operator A this thread consumes coefficients from. A's
+        # numbering starts at global_idx.
+        i = Int32(global_idx) + $iDIM - 1i32
+
+        # Total row count of A (i.e. the full global extent along DIM that
+        # A was built for), recovered from how A_coeffs is packed: WIDTH
+        # coefficients per row, laid out flat.
+        M = Int32(length(A_coeffs)) ÷ $Wi32
+
+        # Constant offset between A's global numbering and x's local
+        # indexing (i - $iDIM is the same for every thread in this launch).
+        goffset = Int32(global_idx) - Int32(first(local_rng))
 
         # Boundary-aware stencil base. Branching here is unavoidable, but only
         # the first/last HWIDTH outputs along DIM diverge from the centered
         # case, so warp divergence is confined to thin boundary slabs.
-        base = i ≤ $Hi32     ? 1i32             :
-               i > M - $Hi32 ? M - $Wi32 + 1i32 :
-               i - $Hi32
+        base = i ≤ $Hi32     ? 1i32 - goffset          :
+               i > M - $Hi32 ? sz[$DIM] - $Wi32 + 1i32 :
+               $iDIM - $Hi32
 
         @inbounds begin
             $accumulator
-            y[$out_idx...] = s
+            $assignment
         end
         return nothing
     end
@@ -337,16 +376,18 @@ end
 # ================================================================================
 
 """
-    _gpu_adjoint_kernel!(y, A_coeffs, x, sz, ::Val{DIM}, ::Val{WIDTH})
+    _gpu_adjoint_kernel!(y, A_coeffs, x, sz,
+                         global_idx, local_rng,
+                         ::Val{DIM}, ::Val{WIDTH})
 
 Apply the transposed `AdjointDiffMatrix` operator along dimension `DIM`.
 
 The adjoint coefficient layout has variable-length boundary rows. For output
 index `j` along `DIM`, the stencil reads:
 
-  - **head**, `j ≤ WIDTH`:           `start = 1`,        `len = j + HWIDTH`
+  - **head**, `j ≤ WIDTH`:           `start = 1`,          `len = j + HWIDTH`
   - **body**, `WIDTH < j ≤ M-WIDTH`: `start = j - HWIDTH`, `len = WIDTH`
-  - **tail**, `j > M - WIDTH`:        `start = j - HWIDTH`, `len = M - j + HWIDTH + 1`
+  - **tail**, `j > M - WIDTH`:       `start = j - HWIDTH`, `len = M - j + HWIDTH + 1`
 
 with pointers into `A_coeffs` given in closed form by `_ptr_for_j`. The body
 case is the hot path and is fully unrolled, exactly like the forward kernel.
@@ -355,33 +396,42 @@ divergence is confined to the first and last `WIDTH` outputs along DIM.
 
 # Arguments
 Identical in role to [`_gpu_forward_kernel!`](@ref): `y`, `A_coeffs`, `x`,
-`sz`, `Val{DIM}`, `Val{WIDTH}`. The kernel should not be called directly —
-the host-side `mul!` method takes care of launch configuration.
+`sz`, `global_idx`, `local_rng`, `Val{DIM}`, `Val{WIDTH}`, `Val{ADD}`. The
+kernel should not be called directly - the host-side `mul!` method takes
+care of launch configuration.
 """
 @generated function _gpu_adjoint_kernel!(y, A_coeffs, x,
                                          sz::NTuple{N, Int32},
-                                         ::Val{DIM},
-                                         ::Val{WIDTH}) where {N, DIM, WIDTH}
+                                 global_idx::Int,
+                                  local_rng::UnitRange,
+                                           ::Val{DIM},
+                                           ::Val{WIDTH},
+                                           ::Val{ADD}) where {N, DIM, WIDTH, ADD}
     HWIDTH = WIDTH >> 1
     Wi32   = Int32(WIDTH)
     Hi32   = Int32(HWIDTH)
 
     iDIM    = Symbol(:i_, DIM)
     out_idx = Expr(:tuple, ntuple(d -> Symbol(:i_, d), N)...)
-    decomp  = _build_decomp(N)
+
+    # Sizes of the iteration space: same as sz (the true shape of x/y)
+    # along every dimension except DIM, where only local_rng's length is
+    # being processed by this launch.
+    local_sizes = Expr(:tuple,
+                        ntuple(d -> d == DIM ? :(n_local) : :(sz[$d]), Val(N))...)
 
     # ----- Body: fully unrolled WIDTH-tap sum, identical pattern to the
     # forward kernel. Coefficient row for output j starts at (j-1)*WIDTH + 1,
     # because the body has WIDTH-wide rows just like the parent matrix.
     body_block = quote
         ptr = (j - 1i32) * $Wi32 + 1i32
-        s   = A_coeffs[ptr] * x[$(_x_idx(DIM, N, :(j - $Hi32)))...]
+        s   = A_coeffs[ptr] * x[$(_x_idx(DIM, N, :($iDIM - $Hi32)))...]
     end
     for p in 1:(WIDTH - 1)
         pi32 = Int32(p)
         push!(body_block.args,
               :(s += A_coeffs[ptr + $pi32] *
-                     x[$(_x_idx(DIM, N, :(j - $Hi32 + $pi32)))...]))
+                     x[$(_x_idx(DIM, N, :($iDIM - $Hi32 + $pi32)))...]))
     end
 
     # ----- Head: variable-length sum from input index 1 up to j + HWIDTH.
@@ -396,7 +446,7 @@ the host-side `mul!` method takes care of launch configuration.
         s        = zero(eltype(y))
         for k in 0i32:(len - 1i32)
             s += A_coeffs[ptr_head + k] *
-                 x[$(_x_idx(DIM, N, :(1i32 + k)))...]
+                 x[$(_x_idx(DIM, N, :(1i32 - goffset + k)))...]
         end
     end
 
@@ -413,18 +463,35 @@ the host-side `mul!` method takes care of launch configuration.
         s        = zero(eltype(y))
         for k in 0i32:(len - 1i32)
             s += A_coeffs[ptr_tail + k] *
-                 x[$(_x_idx(DIM, N, :(j - $Hi32 + k)))...]
+                 x[$(_x_idx(DIM, N, :($iDIM - $Hi32 + k)))...]
         end
     end
 
+    # Build assignment expression
+    assignment = _build_assignment(out_idx, ADD)
+
     return quote
+        # Number of rows this launch is responsible for along DIM.
+        n_local = Int32(length(local_rng))
+
         idx = (blockIdx().x - 1i32) * blockDim().x + threadIdx().x - 1i32
-        idx ≥ prod(sz) && return nothing
+        idx ≥ prod($local_sizes) && return nothing
 
-        $decomp
+        $(_build_decomp(local_sizes, N))
 
-        j = $iDIM
-        M = sz[$DIM]
+        # 0-based offset of this thread within local_rng.
+        off = $iDIM - 1i32
+
+        # True 1-based index into x/y along DIM.
+        $iDIM = Int32(first(local_rng)) + off
+
+        # Global index tracking
+        j = Int32(global_idx) + $iDIM - 1i32
+        M = Int32(length(A_coeffs)) ÷ $Wi32
+
+        # Constant offset between A's global numbering and x's local
+        # indexing (i - $iDIM is the same for every thread in this launch).
+        goffset = Int32(global_idx) - Int32(first(local_rng))
 
         # `local s` declares the accumulator at function scope so the
         # assignments and `+=` updates inside the branches and the inner
@@ -441,7 +508,7 @@ the host-side `mul!` method takes care of launch configuration.
             $tail_block
         end
 
-        @inbounds y[$out_idx...] = s
+        @inbounds $assignment
         return nothing
     end
 end
@@ -452,19 +519,23 @@ end
 # ================================================================================
 
 """
-    _check_shapes(y, A, x, ::Val{DIM})
+    _check_shapes(y, A, x, ::Val{DIM}, global_idx, local_rng)
 
 Validate the array shape conventions shared by both GPU `mul!` methods.
 
 The differentiated dimension of `x` and `y` must equal `size(A, 1)`, and the
 two arrays must otherwise have identical shape. Throws `ArgumentError` with a
-descriptive message if either condition is violated.
+descriptive message if either condition is violated. Also checks that the
+global_idx and local_rng are valid for the sizes of the input/output arrays
+and differentiation operator `A` along the dimension `DIM`.
 """
-@inline function _check_shapes(y, A, x, ::Val{DIM}) where {DIM}
-    size(x, DIM) == size(y, DIM) == size(A, 1) ||
-        throw(ArgumentError("inconsistent sizes"))
+@inline function _check_shapes(y, A, x, ::Val{DIM}, global_idx, local_rng) where {DIM}
     size(x) == size(y) ||
         throw(ArgumentError("y and x must have the same shape"))
+    local_rng[1] > 0 && local_rng[end] ≤ size(x, DIM) ||
+        throw(ArgumentError("out of bounds local range specification"))
+    global_idx > 0 && global_idx + local_rng[end] - 1 ≤ size(A, 1) ||
+        throw(ArgumentError("out of bounds global/local range specification"))
     return nothing
 end
 
@@ -475,7 +546,11 @@ end
 
 """
     LinearAlgebra.mul!(y, A::DiffMatrix{T, WIDTH, OPTIMISE, <:CuArray},
-                       x, ::Val{DIM} = Val(1); nthreads = nothing) -> y
+                       x, ::Val{DIM}=Val(1), ::Val{ADD}=Val(false);
+                       nthreads=nothing) -> y
+    LinearAlgebra.mul!(y, A::DiffMatrix{T, WIDTH, OPTIMISE, <:CuArray},
+                       x, ::Val{DIM}, global_idx, local_rng,
+                       ::Val{ADD}=Val(false); nthreads=nothing) -> y
 
 Apply the forward finite-difference operator `A` on the GPU.
 
@@ -490,11 +565,22 @@ The host validates shapes, picks a launch configuration via
 `nthreads` keyword overrides the per-block thread count and is intended for
 benchmarks; the auto-tuned default is sufficient for production use.
 
+By passing `global_idx` and `local_rng`, the forward operator is applied to
+selected rows of domain-decomposed storage. This method is intended for domain-
+decomposed callers. Ordinary local arrays should use `mul!(y, A, x, Val(DIM))`.
+`x` must provide every stencil entry needed to evaluate `local_rng`. It may
+store halo rows inside its ordinary axes and shift `local_rng` inward, or expose
+ghost cells through halo-aware scalar indices outside those axes. In both
+cases, `global_idx` describes local index `1`, not `first(local_rng)`.
+
 # Arguments
 - `y`: output array, same shape as `x`.
 - `A`: a GPU-resident `DiffMatrix`.
 - `x`: input array; `size(x, DIM)` must equal `size(A, 1)`.
 - `Val{DIM}`: dimension to differentiate along, defaults to `1`.
+- `global_idx`: global row index corresponding to local index `1` of `x`/`y`.
+- `local_rng`: local portion of dimension `DIM` to process.
+- `ADD`: when `true`, add the result into `y` instead of overwriting it.
 - `nthreads`: optional per-block thread-count override.
 
 # Examples
@@ -503,32 +589,40 @@ using CUDA, FDGrids, LinearAlgebra
 
 xs = range(-1, 1; length = 256)
 D  = DiffMatrix(xs, 5, 1)
-Dg = cu(D)
+Dg = CUDA.cu(D)
 
 u  = CuArray(Float32.(sin.(xs)))
 du = similar(u)
 mul!(du, Dg, u)
+
+xs_rng = xs[65:128]
+u = CuArray(Float32.(sin.(xs_rng)))
+du = similar(u)
+mul!(du, Dg, u, Val(1), 65, 65:128, Val(true))
 ```
 """
 function LinearAlgebra.mul!(y::AbstractArray{S, N},
                             A::DiffMatrix{T, WIDTH, OPTIMISE, <:CuArray},
                             x::AbstractArray{S, N},
-                             ::Val{DIM} =Val(1);
-                            nthreads::TH=nothing
-                            ) where {T, S, N, WIDTH, OPTIMISE, DIM, TH<:Union{Nothing, Int}}
+                             ::Val{DIM},
+                   global_idx::Int,
+                    local_rng::UnitRange,
+                             ::Val{ADD}=Val(false);
+                     nthreads::TH=nothing) where {T, S, N, WIDTH, OPTIMISE, DIM, ADD, TH<:Union{Nothing, Int}}
     # Rank cap of 4 reflects the rank cap of the CPU code path and keeps the
     # generated kernel compilation footprint bounded. Most callers use N ≤ 3.
     N   in 1:4 || throw(ArgumentError("N must be in 1:4"))
     DIM in 1:N || throw(ArgumentError("DIM must be in 1:N"))
-    _check_shapes(y, A, x, Val(DIM))
+    ADD isa Bool || throw(ArgumentError("ADD must be true or false"))
+    _check_shapes(y, A, x, Val(DIM), global_idx, local_rng)
 
     # `sz` is passed as a kernel argument so the device kernel can decompose
     # the flat thread id into N-D indices without a dynamic shape query.
-    sz     = Int32.(size(x))
-    total  = length(x)
+    sz     = map(Int32, size(x))
+    total  = Int32(length(x))
 
     # kernel configuration
-    kernel_args = (y, A.coeffs, x, sz, Val(Int32(DIM)), Val(Int32(WIDTH)))
+    kernel_args = (y, A.coeffs, x, sz, global_idx, local_rng, Val(Int32(DIM)), Val(Int32(WIDTH)), Val(ADD))
     _nthreads = if TH <: Nothing
         _get_launch_params(_gpu_forward_kernel!, kernel_args...)
     else
@@ -540,9 +634,13 @@ function LinearAlgebra.mul!(y::AbstractArray{S, N},
     return y
 end
 
+
 """
     LinearAlgebra.mul!(y, A::AdjointDiffMatrix{T, WIDTH, P, <:CuArray},
-                       x, ::Val{DIM} = Val(1); nthreads = nothing) -> y
+                       x, ::Val{DIM}=Val(1); nthreads=nothing) -> y
+    LinearAlgebra.mul!(y, A::AdjointDiffMatrix{T, WIDTH, P, <:CuArray},
+                       x, ::Val{DIM}, global_idx, local_rng,
+                       ::Val{ADD}=Val(false); nthreads=nothing) -> y
 
 Apply the transposed finite-difference operator `A` on the GPU.
 
@@ -556,11 +654,21 @@ The adjoint requires `size(A, 1) > 2 * WIDTH`, which is the same constraint
 the CPU adjoint constructor enforces; it is re-checked here as a defence in
 depth in case the operator was constructed by hand.
 
+By passing `global_idx` and `local_rng`, the adjoint operator is applied to
+selected rows of domain-decomposed storage. This method is intended for domain-
+decomposed callers. Ordinary local arrays should use `mul!(y, A, x, Val(DIM))`.
+`x` must provide every stencil entry needed to evaluate `local_rng`. It may
+store halo rows inside its ordinary axes and shift `local_rng` inward, or expose
+ghost cells through halo-aware scalar indices outside those axes. In both
+cases, `global_idx` describes local index `1`, not `first(local_rng)`.
+
 # Arguments
 - `y`: output array, same shape as `x`.
 - `A`: a GPU-resident `AdjointDiffMatrix`.
 - `x`: input array; `size(x, DIM)` must equal `size(A, 1)`.
 - `Val{DIM}`: dimension to apply the adjoint along, defaults to `1`.
+- `global_idx`: global row index corresponding to local index `1` of `x`/`y`.
+- `local_rng`: local portion of dimension `DIM` to process.
 - `nthreads`: optional per-block thread-count override.
 
 # Examples
@@ -580,16 +688,20 @@ mul!(y, Ag, v)
 function LinearAlgebra.mul!(y::AbstractArray{S, N},
                             A::AdjointDiffMatrix{T, WIDTH, P, <:CuArray},
                             x::AbstractArray{S, N},
-                             ::Val{DIM} =Val(1);
-                            nthreads::TH=nothing
-                            ) where {T, S, N, WIDTH, P, DIM, TH<:Union{Nothing, Int}}
+                             ::Val{DIM},
+                   global_idx::Int,
+                    local_rng::UnitRange,
+                             ::Val{ADD}=Val(false);
+                     nthreads::TH=nothing
+                            ) where {T, S, N, WIDTH, P, DIM, ADD, TH<:Union{Nothing, Int}}
     # Rank cap of 4 reflects the rank cap of the CPU code path and keeps the
     # generated kernel compilation footprint bounded. Most callers use N ≤ 3.
     N   in 1:4 || throw(ArgumentError("N must be in 1:4"))
     DIM in 1:N || throw(ArgumentError("DIM must be in 1:N"))
+    ADD isa Bool || throw(ArgumentError("ADD must be true or false"))
     size(A, 1) > 2 * WIDTH ||
         throw(ArgumentError("GPU adjoint requires size(A,1) > 2*WIDTH"))
-    _check_shapes(y, A, x, Val(DIM))
+    _check_shapes(y, A, x, Val(DIM), 1, 1:size(x, DIM))
 
     # `sz` is passed as a kernel argument so the device kernel can decompose
     # the flat thread id into N-D indices without a dynamic shape query.
@@ -597,7 +709,7 @@ function LinearAlgebra.mul!(y::AbstractArray{S, N},
     total  = length(x)
 
     # kernel configuration
-    kernel_args = (y, A.coeffs, x, sz, Val(Int32(DIM)), Val(Int32(WIDTH)))
+    kernel_args = (y, A.coeffs, x, sz, global_idx, local_rng, Val(Int32(DIM)), Val(Int32(WIDTH)), Val(ADD))
     _nthreads = if TH <: Nothing
         _get_launch_params(_gpu_adjoint_kernel!, kernel_args...)
     else
