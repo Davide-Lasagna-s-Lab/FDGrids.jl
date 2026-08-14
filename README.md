@@ -29,10 +29,11 @@ where a fixed one-dimensional derivative operator is applied many times.
   automatic dispatch — no code changes required beyond `using CUDA`.
 
 ## Installation
+FDGrids.jl is available via the local regsitry [Davide-Lasagna-s-Lab/Registry.jl](https://github.com/Davide-Lasagna-s-Lab/Registry.jl).
 
 ```julia
-using Pkg
-Pkg.add(url = "https://github.com/Davide-Lasagna-s-Lab/FDGrids.jl")
+]registry add "git@github.com:Davide-Lasagna-s-Lab/Registry.jl"
+]add FDGrids
 ```
 
 ## Example
