@@ -72,7 +72,7 @@ function _fill_haloarray!(x_local::HaloArray, x_global, dim::Int, owned, nhalo::
 end
 
 # A HaloArray exposes owned rows as 1:n and the ghost rows through logical
-# indices outside that range. This is the convention used by NSEBaseMPIExt.
+# indices outside that range. This is the convention used by ReSolverFlowsBaseMPIExt.
 function _test_haloarray_halos(op, x_global, y_reference, dim::Int, owned, nhalo::Int, add::Bool)
     N = ndims(x_global)
     comm = MPI.Cart_create(MPI.COMM_SELF, ntuple(_ -> 1, N);
